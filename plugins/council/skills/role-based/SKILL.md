@@ -22,10 +22,11 @@ Before launching any agents, inspect the user question and determine the dimensi
 - the ideal answer shape (for example: direct recommendation, comparison, step-by-step plan, code, concise summary)
 - whether uncertainty, assumptions, trade-offs, edge cases, or failure modes should be emphasized
 
-Then create these three internal artifacts for use in later stages:
+Then create these four internal artifacts for use in later stages:
 - `STAGE1_PROMPT`: a question-specific answering prompt that tells each council member how to answer this exact question well
 - `STAGE2_EVAL_CRITERIA`: a short list of the most relevant evaluation criteria for this exact question
-- `ROLE_ASSIGNMENTS`: four distinct role briefs tailored to the question, one for each council member
+- `ROLE_ASSIGNMENTS`: three distinct role briefs tailored to the question, one for each council member
+- `EVALUATOR_ASSIGNMENTS`: three distinct evaluator briefs tailored to the question, one for each Stage 2 evaluator
 
 Choose roles that create real perspective diversity instead of superficial title changes. Favor complementary roles such as:
 - practical answerer
@@ -33,13 +34,20 @@ Choose roles that create real perspective diversity instead of superficial title
 - edge-case or failure-mode hunter
 - strategic or systems thinker
 
-If the question clearly benefits from a different set of roles, choose those instead. Do NOT use a fixed template library for this step. Generate all three artifacts dynamically from the actual user question.
+If the question clearly benefits from a different set of roles, choose those instead. Do NOT use a fixed template library for this step. Generate all four artifacts dynamically from the actual user question.
+
+For `EVALUATOR_ASSIGNMENTS`, create three non-overlapping verification lenses that fit the question rather than reusing generic reviewer labels. Make them meaningfully different in emphasis and method, but keep them all in verifier mode rather than answer-writing mode. As a guardrail, ensure the three evaluator briefs collectively cover:
+- accuracy, grounding, or logical soundness
+- usefulness, completeness, or synthesis value
+- risk, edge cases, uncertainty, or failure modes
+
+If the question is unusual, reinterpret those buckets appropriately instead of forcing awkward labels.
 
 ---
 
 ## Stage 1: Independent Role-Based Answering
 
-Launch **4 Agent tool calls in a single message** (so they run in parallel). Each agent answers the user's question independently with no knowledge of the others.
+Launch **3 Agent tool calls in a single message** (so they run in parallel). Each agent answers the user's question independently with no knowledge of the others.
 
 For each Stage 1 agent, use this structure:
 - `description`: one of the labels below
@@ -58,21 +66,15 @@ For each Stage 1 agent, use this structure:
 - `description`: "Council member C answering"
 - `model`: "haiku"
 
-**Agent 4:**
-- `description`: "Council member D answering"
-- `model`: "sonnet"
-
 Record each agent's response. Assign anonymous labels:
 - first response -> **Response A**
 - second response -> **Response B**
 - third response -> **Response C**
-- fourth response -> **Response D**
 
 Record the role associated with each response internally as:
 - **Role A**
 - **Role B**
 - **Role C**
-- **Role D**
 
 **Important:** Do NOT reveal which model produced which response in any subsequent stage or in the final output. You may refer to the role labels because role identity is part of this skill's design.
 
@@ -82,38 +84,11 @@ Record the role associated with each response internally as:
 
 Launch **3 Agent tool calls in a single message** (parallel). Each agent evaluates all Stage 1 responses anonymously as a verifier, not just as an editor.
 
-For each evaluator, use this prompt (inserting the actual response texts, role labels, and generated evaluation criteria):
+Before launching the evaluators, create one shared `STAGE2_SCORECARD_FORMAT` artifact containing the exact structured output shape below. All three evaluators must use this same output format so their judgments remain comparable, even though their evaluation prompts differ.
+
+`STAGE2_SCORECARD_FORMAT`:
 
 ```
-You are evaluating anonymous answers to a question. Evaluate them as a verifier who is trying to identify what is trustworthy, what is missing, and what should not be carried into a synthesized final answer.
-
-**Original Question:** $ARGUMENTS
-
-**Evaluation Criteria:**
-<insert STAGE2_EVAL_CRITERIA>
-
-**Response A (Role A):**
-<insert Response A text>
-
-**Response B (Role B):**
-<insert Response B text>
-
-**Response C (Role C):**
-<insert Response C text>
-
-**Response D (Role D):**
-<insert Response D text>
-
-For each response:
-1. Judge it against the evaluation criteria above.
-2. Identify any likely mistakes, unsupported claims, or parts that should not be trusted.
-3. Identify important omissions.
-4. Assess whether it used its assigned role well.
-5. Give a total score from 1 to 10.
-6. Flag a fatal flaw if present; otherwise write "none".
-
-Return your evaluation in this exact format:
-
 SCORECARD:
 Response A:
   - Score: <integer 1-10>
@@ -145,30 +120,69 @@ Response C:
     - <criterion 2>: <brief judgment or score>
     - <criterion 3>: <brief judgment or score>
     - <add more only if needed>
-Response D:
-  - Score: <integer 1-10>
-  - Fatal flaw: <one sentence or "none">
-  - Key omissions: <brief list or "none">
-  - Role adherence: <brief judgment>
-  - Criteria assessments:
-    - <criterion 1>: <brief judgment or score>
-    - <criterion 2>: <brief judgment or score>
-    - <criterion 3>: <brief judgment or score>
-    - <add more only if needed>
 OVERALL RECOMMENDED: Response [letter]
 ```
+
+Use evaluator-specific prompts so the council gets question-matched verification lenses instead of three fixed reviewer personas. Keep the same question, criteria, responses, and output format across evaluators; vary only the evaluator assignment and the way it is told to inspect the material.
+
+For each evaluator, use this prompt structure, inserting the actual response texts, role labels, generated evaluation criteria, and the matching brief from `EVALUATOR_ASSIGNMENTS`:
+
+```
+You are evaluating anonymous answers to a question. Act strictly as a verifier, not as a replacement answerer. Your job is to determine what is reliable, what is missing, what is fragile, and what should or should not survive into a synthesized final answer.
+
+Your assigned evaluation lens:
+<insert evaluator brief from EVALUATOR_ASSIGNMENTS>
+
+Apply that lens strongly, but still judge the full quality of each response against the shared evaluation criteria. Do not ignore major issues just because they fall outside your primary lens.
+
+**Original Question:** $ARGUMENTS
+
+**Evaluation Criteria:**
+<insert STAGE2_EVAL_CRITERIA>
+
+**Response A (Role A):**
+<insert Response A text>
+
+**Response B (Role B):**
+<insert Response B text>
+
+**Response C (Role C):**
+<insert Response C text>
+
+For each response:
+1. Judge it against the evaluation criteria above.
+2. Identify likely mistakes, unsupported claims, brittle assumptions, or other weaknesses most relevant to your assigned evaluation lens.
+3. Identify important omissions.
+4. Assess whether it used its assigned role well.
+5. Give a total score from 1 to 10.
+6. Flag a fatal flaw if present; otherwise write "none".
+
+Use this exact output format:
+
+<insert STAGE2_SCORECARD_FORMAT>
+```
+
+When generating the three evaluator prompts:
+- Evaluator 1 uses `EVALUATOR_ASSIGNMENTS[1]`
+- Evaluator 2 uses `EVALUATOR_ASSIGNMENTS[2]`
+- Evaluator 3 uses `EVALUATOR_ASSIGNMENTS[3]`
+- keep the prompts parallel and structurally comparable
+- make sure the three evaluator briefs are genuinely distinct, not paraphrases
 
 **Agent 1:**
 - `description`: "Council evaluator 1"
 - `model`: "opus"
+- `prompt`: <insert Stage 2 template with Evaluator Assignment 1>
 
 **Agent 2:**
 - `description`: "Council evaluator 2"
 - `model`: "sonnet"
+- `prompt`: <insert Stage 2 template with Evaluator Assignment 2>
 
 **Agent 3:**
 - `description`: "Council evaluator 3"
 - `model`: "haiku"
+- `prompt`: <insert Stage 2 template with Evaluator Assignment 3>
 
 After collecting all evaluations, parse each `SCORECARD:` block and compute an internal `AGGREGATE_SCORECARD` for the chairman. For each response:
 - total the reported `Score` values
@@ -213,12 +227,6 @@ You are the chairman of a role-based LLM Council. Your job is to synthesize the 
 **Response C:**
 <insert Response C text>
 
-**Role D:**
-<insert Role D brief>
-
-**Response D:**
-<insert Response D text>
-
 **Evaluator 1's Scorecard:**
 <insert Evaluator 1's full scorecard>
 
@@ -244,11 +252,6 @@ VERDICT B:
 - UNCERTAIN: <claims that may be useful but should be softened, qualified, or omitted, or "none">
 
 VERDICT C:
-- ADOPT: <strongest points or "none">
-- REJECT: <claims to discard and why, or "none">
-- UNCERTAIN: <claims that may be useful but should be softened, qualified, or omitted, or "none">
-
-VERDICT D:
 - ADOPT: <strongest points or "none">
 - REJECT: <claims to discard and why, or "none">
 - UNCERTAIN: <claims that may be useful but should be softened, qualified, or omitted, or "none">
@@ -279,13 +282,11 @@ Present the results to the user in this format:
 - Response A: <Role A brief>
 - Response B: <Role B brief>
 - Response C: <Role C brief>
-- Response D: <Role D brief>
 
 **Aggregate Scorecard:**
 - Response A: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
 - Response B: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
 - Response C: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
-- Response D: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
 
 **Key omissions addressed in the final answer:** <brief list>
 
