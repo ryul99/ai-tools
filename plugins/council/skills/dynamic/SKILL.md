@@ -23,11 +23,12 @@ Before launching any agents, inspect the user question and determine the dimensi
 - whether uncertainty, assumptions, trade-offs, edge cases, or failure modes should be emphasized
 - whether the question is simple enough for a small council or complex enough to justify more coverage
 
-Then create these four internal artifacts for use in later stages:
+Then create these five internal artifacts for use in later stages:
 - `STAGE1_PROMPT`: a question-specific answering prompt that tells each council member how to answer this exact question well
 - `STAGE2_EVAL_CRITERIA`: a short list of the most relevant evaluation criteria for this exact question
 - `COUNCIL_PLAN`: a compact plan describing how large the council should be and whether a second round is needed
 - `MEMBER_BRIEFS`: short differentiated briefs for each planned member so the council explores multiple angles rather than producing near-duplicates
+- `EVALUATOR_ASSIGNMENTS`: differentiated evaluator briefs matched to `COUNCIL_PLAN.evaluator_count`
 
 `COUNCIL_PLAN` must use this exact structure:
 
@@ -48,6 +49,13 @@ Use these guardrails:
 - never exceed the limits above
 
 Do NOT use a fixed template library for this step. Generate all artifacts dynamically from the actual user question.
+
+For `EVALUATOR_ASSIGNMENTS`, generate exactly the same number of evaluator briefs as `COUNCIL_PLAN.evaluator_count`. Make them meaningfully different in emphasis and method, but keep them all in verifier mode rather than answer-writing mode. As a guardrail, make sure the set of evaluator briefs collectively covers:
+- accuracy, grounding, or logical soundness
+- usefulness, completeness, or synthesis value
+- risk, edge cases, uncertainty, or failure modes
+
+If `evaluator_count` is 4, use the fourth evaluator to cover the most decision-relevant extra lens for this question rather than duplicating the first three. If the question is unusual, reinterpret these buckets appropriately instead of forcing awkward labels.
 
 ---
 
@@ -93,35 +101,11 @@ Launch the number of evaluator Agent tool calls specified by `COUNCIL_PLAN.evalu
 
 Each evaluator should assess all available responses, and if Stage 1B ran, also assess whether the gap notes provide useful corrective information.
 
-For each evaluator, use this prompt:
+Before launching the evaluators, create one shared `STAGE2_SCORECARD_FORMAT` artifact containing the exact structured output shape below. All evaluators must use this same output format so their judgments remain comparable even when their assigned lenses differ.
+
+`STAGE2_SCORECARD_FORMAT`:
 
 ```
-You are evaluating anonymous answers to a question. Evaluate them as a verifier who is trying to identify what is trustworthy, what is missing, and what should not be carried into a synthesized final answer.
-
-**Original Question:** $ARGUMENTS
-
-**Evaluation Criteria:**
-<insert STAGE2_EVAL_CRITERIA>
-
-**Responses:**
-<insert Response A through the highest response label actually present>
-
-**Gap Notes:**
-<insert Gap Note X/Y if present, otherwise write "none">
-
-For each response:
-1. Judge it against the evaluation criteria above.
-2. Identify any likely mistakes, unsupported claims, or parts that should not be trusted.
-3. Identify important omissions.
-4. Give a total score from 1 to 10.
-5. Flag a fatal flaw if present; otherwise write "none".
-
-Then assess the gap notes:
-- whether they add genuinely useful missing information
-- whether they introduce any unsupported material that should not be trusted
-
-Return your evaluation in this exact format:
-
 SCORECARD:
 Response A:
   - Score: <integer 1-10>
@@ -138,6 +122,52 @@ Gap Notes:
   - Cautions: <brief judgment or "none">
 OVERALL RECOMMENDED: Response [letter]
 ```
+
+Use evaluator-specific prompts so the dynamic council gets question-matched verification lenses instead of near-duplicate evaluators. Keep the same question, criteria, responses, gap notes, and output format across evaluators; vary only the evaluator assignment and the way it is told to inspect the material.
+
+For each evaluator, use this prompt:
+
+```
+You are evaluating anonymous answers to a question. Act strictly as a verifier, not as a replacement answerer. Your job is to determine what is reliable, what is missing, what is fragile, and what should or should not survive into a synthesized final answer.
+
+Your assigned evaluation lens:
+<insert matching evaluator brief from EVALUATOR_ASSIGNMENTS>
+
+Apply that lens strongly, but still judge the full quality of each response against the shared evaluation criteria. Do not ignore major issues just because they fall outside your primary lens.
+
+**Original Question:** $ARGUMENTS
+
+**Evaluation Criteria:**
+<insert STAGE2_EVAL_CRITERIA>
+
+**Responses:**
+<insert Response A through the highest response label actually present>
+
+**Gap Notes:**
+<insert Gap Note X/Y if present, otherwise write "none">
+
+For each response:
+1. Judge it against the evaluation criteria above.
+2. Identify likely mistakes, unsupported claims, brittle assumptions, or other weaknesses most relevant to your assigned evaluation lens.
+3. Identify important omissions.
+4. Give a total score from 1 to 10.
+5. Flag a fatal flaw if present; otherwise write "none".
+
+Then assess the gap notes:
+- whether they add genuinely useful missing information
+- whether they introduce any unsupported, brittle, or misleading material
+- whether their value or weakness is especially visible through your assigned evaluation lens
+
+Use this exact output format:
+
+<insert STAGE2_SCORECARD_FORMAT>
+```
+
+When generating evaluator prompts:
+- create exactly `COUNCIL_PLAN.evaluator_count` prompts
+- assign `EVALUATOR_ASSIGNMENTS` sequentially to those prompts
+- keep the prompts parallel and structurally comparable
+- make sure the evaluator briefs are genuinely distinct, not paraphrases
 
 After collecting all evaluations, parse each `SCORECARD:` block and compute an internal `AGGREGATE_SCORECARD` for the chairman. For each response:
 - total the reported `Score` values
