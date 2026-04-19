@@ -1,0 +1,23 @@
+{
+  "name": "ryul99-ai-tools",
+  "owner": {
+    "name": "ryul99"
+  },
+  "metadata": {
+    "description": "ryul99's AI tools for Claude Code"
+  },
+  "plugins": [
+    {
+      "name": "english-lecturer",
+      "source": "./plugins/english-lecturer",
+      "description": "English lecturer hook - corrects and teaches English from your prompts",
+      "version": "1.0.0"
+    },
+    {
+      "name": "council",
+      "source": "./plugins/council",
+      "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
+      "version": "1.0.0"
+    }
+  ]
+}
