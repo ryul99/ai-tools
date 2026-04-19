@@ -1,5 +1,4 @@
 ---
-name: baseline
 description: Convene a simple LLM Council to answer a question. Launches Opus, Sonnet, and Haiku independently, has them anonymously evaluate each other's answers, then synthesizes the best response. Use when you want the original 3-member council flow as a fast, reliable second opinion.
 allowed-tools: Agent
 ---

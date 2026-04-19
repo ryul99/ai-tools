@@ -1,5 +1,4 @@
 ---
-name: dynamic
 description: Convene an adaptive LLM Council that decides its member count, model mix, and optional second-round refinement based on the question. Use when you want depth to scale with complexity and stakes.
 allowed-tools: Agent
 ---

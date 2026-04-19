@@ -1,5 +1,4 @@
 ---
-name: role-based
 description: Convene a role-based LLM Council to answer a question. Assigns each member a distinct perspective, then uses anonymous peer evaluation and chairman synthesis to combine strong ideas while filtering weak ones.
 allowed-tools: Agent
 ---
