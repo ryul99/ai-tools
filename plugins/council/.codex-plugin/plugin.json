@@ -1,0 +1,27 @@
+{
+  "name": "council",
+  "version": "1.0.0",
+  "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["council", "multi-agent", "decision-support"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Council",
+    "shortDescription": "Run baseline, dynamic, and role-based LLM council workflows.",
+    "longDescription": "Council bundles three skill variants for multi-model deliberation: a fast baseline council, an adaptive dynamic council, and a role-based council that emphasizes perspective diversity before synthesis.",
+    "developerName": "ryul99",
+    "category": "Productivity",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/ryul99/ai-tools",
+    "defaultPrompt": [
+      "Convene the baseline council for this question.",
+      "Use the dynamic council for a high-stakes decision.",
+      "Run the role-based council on this prompt."
+    ]
+  }
+}
