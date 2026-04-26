@@ -1,7 +1,7 @@
 {
   "name": "council",
   "version": "1.0.0",
-  "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
+  "description": "LLM Council - get answers from multiple model configurations, have them evaluate each other anonymously, and synthesize the best response",
   "author": {
     "name": "ryul99",
     "url": "https://github.com/ryul99"
