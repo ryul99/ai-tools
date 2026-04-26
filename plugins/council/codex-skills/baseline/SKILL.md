@@ -13,7 +13,15 @@ Follow the stages below exactly. Each stage must complete before the next begins
 
 ## Model Diversity Policy
 
-The core value of this council is independent judgment from diverse model configurations. When spawning subagents, choose from the GPT model aliases that are already known in the current session, runtime, or user request. Prefer distinct aliases across council members when more than one is available.
+The core value of this council is independent judgment from diverse model configurations. Do not hardcode concrete model aliases in this skill. Instead, before Stage 1, build an internal `MODEL_SLOT_MAP` from model override aliases that are explicitly available at execution time.
+
+Use these sources, in order:
+
+1. Model override aliases exposed by the active `spawn_agent` tool declaration or runtime metadata.
+2. Model aliases explicitly supplied by the user in the council request.
+3. Model aliases already present in the current session instructions.
+
+Never invent or guess a model alias. When at least two concrete aliases are available, assign distinct aliases to council members whenever possible. When a slot has a concrete alias in `MODEL_SLOT_MAP`, every `spawn_agent` call for that slot must include both `model: <alias>` and the slot's `reasoning_effort`.
 
 Use these model slots:
 
@@ -30,7 +38,7 @@ Prefer diversity in this order:
 3. Different reasoning efforts if only one model alias is available.
 4. Different member briefs as a final fallback.
 
-If no concrete model alias is known at execution time, omit `model` and vary only `reasoning_effort`. Never invent or guess a model alias.
+If fewer concrete aliases are available than slots, reuse the best available aliases only after maximizing diversity. If no concrete model alias is exposed at execution time, omit `model`, vary only `reasoning_effort`, and mention in `Council Details` that the runtime did not expose model override aliases so model diversity could not be verified.
 
 ## Stage 0: Question Analysis and Prompt Design
 
