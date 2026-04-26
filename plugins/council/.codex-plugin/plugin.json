@@ -9,6 +9,7 @@
   "homepage": "https://github.com/ryul99/ai-tools",
   "repository": "https://github.com/ryul99/ai-tools",
   "keywords": ["council", "multi-agent", "decision-support"],
+  "skills": "./codex-skills/",
   "interface": {
     "displayName": "Council",
     "shortDescription": "Run baseline, dynamic, and role-based LLM council workflows.",
