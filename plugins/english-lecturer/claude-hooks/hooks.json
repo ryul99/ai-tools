@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/english-lecturer.sh"
+            "command": "${CLAUDE_PLUGIN_ROOT}/claude-hooks/english-lecturer.sh"
           }
         ]
       }
