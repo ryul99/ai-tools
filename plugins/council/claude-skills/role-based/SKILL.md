@@ -14,6 +14,35 @@ Follow the stages below **exactly**. Each stage must complete before the next be
 
 ---
 
+## Model Diversity Policy
+
+The core value of this council is independent judgment from diverse model configurations. Do not hardcode concrete model IDs in this skill. Instead, before Stage 1, build an internal `MODEL_SLOT_MAP` from model aliases and full model IDs that are explicitly available at execution time.
+
+Use these sources, in order:
+
+1. Full model IDs or aliases visible in the current session context, for example from the active session's `--model` configuration, runtime metadata, or system context.
+2. Full model IDs or model aliases explicitly supplied by the user in the council request.
+3. Model aliases already present in the current session instructions.
+
+Never invent or guess a model ID. When at least two concrete models are available, assign distinct models to council members whenever possible.
+
+Use these model slots:
+
+- `strong`: strongest available model
+- `balanced`: a different available model when possible; otherwise the next strongest
+- `compact`: a faster or lower-cost available model when possible
+- `chairman`: strongest available model
+
+Prefer diversity in this order:
+
+1. Different concrete full model IDs across members (for example, two different versions of the same tier, or models from different tiers).
+2. Different model tiers using shorthand aliases (`opus`, `sonnet`, `haiku`).
+3. Different member briefs as a final fallback if only one model is distinguishable.
+
+If no concrete version IDs are exposed at execution time beyond the shorthand aliases, use the shorthand aliases for tier diversity and note in `Council Details` that version-level model diversity could not be verified.
+
+---
+
 ## Stage 0: Question Analysis, Prompt Design, and Role Selection
 
 Before launching any agents, inspect the user question and determine the dimensions that should shape both the answering prompt and the evaluation criteria. Consider factors such as:
@@ -56,15 +85,15 @@ For each Stage 1 agent, use this structure:
 
 **Agent 1:**
 - `description`: "Council member A answering"
-- `model`: "opus"
+- `model`: `strong` slot from `MODEL_SLOT_MAP`
 
 **Agent 2:**
 - `description`: "Council member B answering"
-- `model`: "sonnet"
+- `model`: `balanced` slot from `MODEL_SLOT_MAP`
 
 **Agent 3:**
 - `description`: "Council member C answering"
-- `model`: "haiku"
+- `model`: `compact` slot from `MODEL_SLOT_MAP`
 
 Record each agent's response. Assign anonymous labels:
 - first response -> **Response A**
@@ -171,17 +200,17 @@ When generating the three evaluator prompts:
 
 **Agent 1:**
 - `description`: "Council evaluator 1"
-- `model`: "opus"
+- `model`: `strong` slot from `MODEL_SLOT_MAP`
 - `prompt`: <insert Stage 2 template with Evaluator Assignment 1>
 
 **Agent 2:**
 - `description`: "Council evaluator 2"
-- `model`: "sonnet"
+- `model`: `balanced` slot from `MODEL_SLOT_MAP`
 - `prompt`: <insert Stage 2 template with Evaluator Assignment 2>
 
 **Agent 3:**
 - `description`: "Council evaluator 3"
-- `model`: "haiku"
+- `model`: `compact` slot from `MODEL_SLOT_MAP`
 - `prompt`: <insert Stage 2 template with Evaluator Assignment 3>
 
 After collecting all evaluations, parse each `SCORECARD:` block and compute an internal `AGGREGATE_SCORECARD` for the chairman. For each response:
@@ -201,7 +230,7 @@ Launch **1 Agent tool call**. The chairman sees everything but with anonymous la
 
 **Chairman Agent:**
 - `description`: "Council chairman synthesizing"
-- `model`: "opus"
+- `model`: `chairman` slot from `MODEL_SLOT_MAP`
 - `prompt`:
 
 ```

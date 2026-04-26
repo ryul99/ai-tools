@@ -14,6 +14,35 @@ Follow the stages below **exactly**. Each stage must complete before the next be
 
 ---
 
+## Model Diversity Policy
+
+The core value of this council is independent judgment from diverse model configurations. Do not hardcode concrete model IDs in this skill. Instead, before Stage 1, build an internal `MODEL_SLOT_MAP` from model aliases and full model IDs that are explicitly available at execution time.
+
+Use these sources, in order:
+
+1. Full model IDs or aliases visible in the current session context, for example from the active session's `--model` configuration, runtime metadata, or system context.
+2. Full model IDs or model aliases explicitly supplied by the user in the council request.
+3. Model aliases already present in the current session instructions.
+
+Never invent or guess a model ID. When at least two concrete models are available, assign distinct models to council members whenever possible.
+
+Use these model slots:
+
+- `strong`: strongest available model
+- `balanced`: a different available model when possible; otherwise the next strongest
+- `compact`: a faster or lower-cost available model when possible
+- `chairman`: strongest available model
+
+Prefer diversity in this order:
+
+1. Different concrete full model IDs across members (for example, two different versions of the same tier, or models from different tiers).
+2. Different model tiers using shorthand aliases (`opus`, `sonnet`, `haiku`).
+3. Different member briefs as a final fallback if only one model is distinguishable.
+
+If no concrete version IDs are exposed at execution time beyond the shorthand aliases, use the shorthand aliases for tier diversity and note in `Council Details` that version-level model diversity could not be verified.
+
+---
+
 ## Stage 0: Question Analysis and Prompt Design
 
 Before launching any agents, inspect the user question and determine the dimensions that should shape both the answering prompt and the evaluation criteria. Consider factors such as:
@@ -39,17 +68,17 @@ For each Stage 1 agent, use this structure:
 - `model`: as specified below
 - `prompt`: "<insert STAGE1_PROMPT>\n\nQuestion: $ARGUMENTS"
 
-**Agent 1 (Opus):**
+**Agent 1:**
 - `description`: "Council member A answering"
-- `model`: "opus"
+- `model`: `strong` slot from `MODEL_SLOT_MAP`
 
-**Agent 2 (Sonnet):**
+**Agent 2:**
 - `description`: "Council member B answering"
-- `model`: "sonnet"
+- `model`: `balanced` slot from `MODEL_SLOT_MAP`
 
-**Agent 3 (Haiku):**
+**Agent 3:**
 - `description`: "Council member C answering"
-- `model`: "haiku"
+- `model`: `compact` slot from `MODEL_SLOT_MAP`
 
 Record each agent's response. Assign anonymous labels:
 - Opus response -> **Response A**
@@ -123,17 +152,17 @@ Response C:
 OVERALL RECOMMENDED: Response [letter]
 ```
 
-**Agent 1 (Opus):**
+**Agent 1:**
 - `description`: "Council evaluator 1"
-- `model`: "opus"
+- `model`: `strong` slot from `MODEL_SLOT_MAP`
 
-**Agent 2 (Sonnet):**
+**Agent 2:**
 - `description`: "Council evaluator 2"
-- `model`: "sonnet"
+- `model`: `balanced` slot from `MODEL_SLOT_MAP`
 
-**Agent 3 (Haiku):**
+**Agent 3:**
 - `description`: "Council evaluator 3"
-- `model`: "haiku"
+- `model`: `compact` slot from `MODEL_SLOT_MAP`
 
 After collecting all evaluations, parse each `SCORECARD:` block and compute an internal `AGGREGATE_SCORECARD` for the chairman. For each response:
 - total the reported `Score` values
@@ -149,9 +178,9 @@ If a scorecard is partially malformed or missing fields, degrade conservatively 
 
 Launch **1 Agent tool call**. The chairman sees everything but with anonymous labels -- no model names.
 
-**Chairman Agent (Opus):**
+**Chairman Agent:**
 - `description`: "Council chairman synthesizing"
-- `model`: "opus"
+- `model`: `chairman` slot from `MODEL_SLOT_MAP`
 - `prompt`:
 
 ```
@@ -220,9 +249,9 @@ Present the results to the user in this format:
 <summary>Council Details</summary>
 
 **Aggregate Scorecard:**
-- Response A (Opus): total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
-- Response B (Sonnet): total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
-- Response C (Haiku): total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
+- Response A: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
+- Response B: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
+- Response C: total score <n>, fatal flaws <n>, recommended by <n>/3 evaluators
 
 **Key omissions addressed in the final answer:** <brief list>
 

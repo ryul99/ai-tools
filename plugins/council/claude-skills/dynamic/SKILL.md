@@ -14,6 +14,35 @@ Follow the stages below **exactly**. Each stage must complete before the next be
 
 ---
 
+## Model Diversity Policy
+
+The core value of this council is independent judgment from diverse model configurations. Do not hardcode concrete model IDs in this skill. Instead, before Stage 0, build an internal `MODEL_SLOT_MAP` from model aliases and full model IDs that are explicitly available at execution time.
+
+Use these sources, in order:
+
+1. Full model IDs or aliases visible in the current session context, for example from the active session's `--model` configuration, runtime metadata, or system context.
+2. Full model IDs or model aliases explicitly supplied by the user in the council request.
+3. Model aliases already present in the current session instructions.
+
+Never invent or guess a model ID. When at least two concrete models are available, assign distinct models to council members whenever possible.
+
+Use these model slots:
+
+- `strong`: strongest available model
+- `balanced`: a different available model when possible; otherwise the next strongest
+- `compact`: a faster or lower-cost available model when possible
+- `chairman`: strongest available model
+
+Prefer diversity in this order:
+
+1. Different concrete full model IDs across members (for example, two different versions of the same tier, or models from different tiers).
+2. Different model tiers using shorthand aliases (`opus`, `sonnet`, `haiku`).
+3. Different member briefs as a final fallback if only one model is distinguishable.
+
+If no concrete version IDs are exposed at execution time beyond the shorthand aliases, use the shorthand aliases for tier diversity and note in `Council Details` that version-level model diversity could not be verified.
+
+---
+
 ## Stage 0: Question Analysis and Council Planning
 
 Before launching any agents, inspect the user question and determine the dimensions that should shape both the answering prompt and the council structure. Consider factors such as:
@@ -36,7 +65,7 @@ Then create these five internal artifacts for use in later stages:
 COUNCIL_PLAN:
 - agent_count: <integer from 3 to 7>
 - evaluator_count: <integer from 2 to 4>
-- model_mix: <brief allocation such as "opus x1, sonnet x2, haiku x1">
+- model_mix: <brief allocation using slots from `MODEL_SLOT_MAP`, such as "strong x1, balanced x2, compact x1">
 - second_round: <true or false>
 - rationale: <one short sentence>
 ```
@@ -187,7 +216,7 @@ Launch **1 Agent tool call**. The chairman sees everything but with anonymous la
 
 **Chairman Agent:**
 - `description`: "Dynamic council chairman synthesizing"
-- `model`: "opus"
+- `model`: `chairman` slot from `MODEL_SLOT_MAP`
 - `prompt`:
 
 ```
