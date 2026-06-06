@@ -270,6 +270,7 @@ FINAL ANSWER:
 
 Present the results to the user in this format:
 
+```markdown
 ### Dynamic Council Result
 
 **Final Answer** (from Chairman synthesis):
@@ -290,7 +291,6 @@ Present the results to the user in this format:
 
 **Chairman's verdict summary:** <brief summary of what was adopted, rejected, or treated as uncertain>
 </details>
+```
 
-**Important notes:**
-- This variant intentionally scales cost and depth with the question
-- If any agent fails, continue with the remaining responses -- graceful degradation
+If any agent fails, continue with the remaining responses and mention the reduced sample size in `Council Details`.

@@ -12,8 +12,8 @@
   "skills": "./codex-skills/",
   "interface": {
     "displayName": "Council",
-    "shortDescription": "Run baseline, dynamic, and role-based LLM council workflows.",
-    "longDescription": "Council bundles three skill variants for multi-model deliberation: a fast baseline council, an adaptive dynamic council, and a role-based council that emphasizes perspective diversity before synthesis.",
+    "shortDescription": "Run baseline and dynamic LLM council workflows.",
+    "longDescription": "Council bundles two skill variants for multi-model deliberation: a fast baseline council and an adaptive dynamic council that scales depth with complexity and stakes.",
     "developerName": "ryul99",
     "category": "Productivity",
     "capabilities": ["Interactive", "Write"],
@@ -21,7 +21,7 @@
     "defaultPrompt": [
       "Convene the baseline council for this question.",
       "Use the dynamic council for a high-stakes decision.",
-      "Run the role-based council on this prompt."
+      "Compare the baseline and dynamic council approaches for this prompt."
     ]
   }
 }

@@ -1,5 +1,5 @@
 ---
-description: Convene a simple LLM Council to answer a question. Launches Opus, Sonnet, and Haiku independently, has them anonymously evaluate each other's answers, then synthesizes the best response. Use when you want the original 3-member council flow as a fast, reliable second opinion.
+description: Convene a simple LLM Council to answer a question. Launches strong, balanced, and compact model slots independently, has them anonymously evaluate each other's answers, then synthesizes the best response. Use when you want the original 3-member council flow as a fast, reliable second opinion.
 disable-model-invocation: true
 argument-hint: [the question to ask the council]
 allowed-tools: Agent
@@ -82,9 +82,9 @@ For each Stage 1 agent, use this structure:
 - `model`: `compact` slot from `MODEL_SLOT_MAP`
 
 Record each agent's response. Assign anonymous labels:
-- Opus response -> **Response A**
-- Sonnet response -> **Response B**
-- Haiku response -> **Response C**
+- Agent 1 response -> **Response A**
+- Agent 2 response -> **Response B**
+- Agent 3 response -> **Response C**
 
 **Important:** Do NOT reveal which model produced which response in any subsequent stage or in the final output.
 
@@ -241,6 +241,7 @@ FINAL ANSWER:
 
 Present the results to the user in this format:
 
+```markdown
 ### Council Result
 
 **Final Answer** (from Chairman synthesis):
@@ -258,7 +259,6 @@ Present the results to the user in this format:
 
 **Chairman's verdict summary:** <brief summary of what was adopted, rejected, or treated as uncertain>
 </details>
+```
 
-**Important notes:**
-- The `<details>` block gives users optional transparency without cluttering the main answer
-- If any agent fails, continue with the remaining responses -- graceful degradation
+If any agent fails, continue with the remaining responses and mention the reduced sample size in `Council Details`.

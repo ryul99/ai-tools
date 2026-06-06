@@ -100,7 +100,7 @@ For each Stage 1 subagent, use this structure:
 - `message`: `<insert STAGE1_PROMPT>\n\nMember brief: <insert corresponding brief from MEMBER_BRIEFS>\n\nAnswer independently from this angle. Prioritize insight and honesty over agreement.\n\nQuestion: <insert the user's question>`
 - `model` and `reasoning_effort`: assign according to `COUNCIL_PLAN.model_mix`; set `model` only when a concrete available model alias is known
 
-Assign anonymous labels sequentially based on collection order:
+Assign anonymous labels sequentially based on launch order:
 
 - first response -> `Response A`
 - second response -> `Response B`
