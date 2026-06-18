@@ -2,5 +2,8 @@
   "name": "council",
   "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
   "version": "1.0.0",
+  "author": {
+    "name": "ryul99"
+  },
   "skills": "./claude-skills/"
 }
