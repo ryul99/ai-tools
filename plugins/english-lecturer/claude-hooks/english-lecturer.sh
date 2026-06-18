@@ -3,11 +3,18 @@
 
 INPUT="$(cat)"
 
+# Ignore subagent response
 if [[ "$(echo "$INPUT" | jq -r '.agent_id // .agent_type // empty')" != "" ]]; then
     exit 0
 fi
 
 INPUT_PROMPT="$(echo "$INPUT" | jq -r '.prompt')"
+
+# Ignore subagent response
+if [[ "$INPUT_PROMPT" == "<task-notification>"* ]]; then
+    exit 0
+fi
+
 TARGET_LANGUAGE="Korean"
 
 JSON_SCHEMA='
