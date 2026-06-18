@@ -1,7 +1,13 @@
 #!/bin/bash
 # acknowledge: https://github.com/crescent-stdio for prompt
 
-INPUT_PROMPT="$(cat | jq '.prompt')"
+INPUT="$(cat)"
+
+if [[ "$(echo "$INPUT" | jq -r '.agent_id // .agent_type // empty')" != "" ]]; then
+    exit 0
+fi
+
+INPUT_PROMPT="$(echo "$INPUT" | jq -r '.prompt')"
 TARGET_LANGUAGE="Korean"
 
 JSON_SCHEMA='
