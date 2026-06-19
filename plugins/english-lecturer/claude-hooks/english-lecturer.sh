@@ -87,6 +87,8 @@ RESPONSE="$( \
     --tools='' \
     --strict-mcp-config \
     --no-session-persistence \
+    --safe-mode \
+    --disable-slash-commands \
     --model sonnet \
     --settings '{ "disableAllHooks": true }' \
     --output-format json \
