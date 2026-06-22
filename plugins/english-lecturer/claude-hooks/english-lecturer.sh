@@ -89,7 +89,7 @@ RESPONSE="$( \
     --no-session-persistence \
     --safe-mode \
     --disable-slash-commands \
-    --model sonnet \
+    --model haiku \
     --settings '{ "disableAllHooks": true }' \
     --output-format json \
     --json-schema "$JSON_SCHEMA" \
