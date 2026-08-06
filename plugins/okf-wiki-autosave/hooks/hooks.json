@@ -1,0 +1,22 @@
+{
+  "description": "Maintain opted-in shared OKF documents after Claude Code turns.",
+  "hooks": {
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3",
+            "args": [
+              "${CLAUDE_PLUGIN_ROOT}/scripts/okf_autosave.py",
+              "--data-dir",
+              "${CLAUDE_PLUGIN_DATA}"
+            ],
+            "timeout": 120,
+            "statusMessage": "Updating shared OKF documents"
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -8,6 +8,7 @@ A small collection of plugins for Codex and Claude Code.
 | --- | --- | --- | --- |
 | `council` | Yes | Yes | Uses multiple model perspectives to evaluate and synthesize answers. |
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
+| `okf-wiki-autosave` | No | Yes | Optionally maintains shared OKF work documents after Claude Code turns. |
 | `english-lecturer` | No | Yes | Corrects English prompts and provides brief language feedback. |
 
 ## Installation
@@ -26,10 +27,13 @@ codex plugin add okf-wiki@ryul99-ai-tools
 claude plugin marketplace add ryul99/ai-tools
 claude plugin install council@ryul99-ai-tools
 claude plugin install okf-wiki@ryul99-ai-tools
+claude plugin install okf-wiki-autosave@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
 ```
 
-Install only the plugins you need.
+Install only the plugins you need. `okf-wiki` never installs a hook. Install
+`okf-wiki-autosave` separately when automatic updates are wanted; it declares
+`okf-wiki` as a dependency, so installing the autosave plugin is sufficient.
 
 ## Usage
 
@@ -45,5 +49,11 @@ The `okf-wiki` plugin expects the `okf` CLI to be installed. Run it inside a wik
 ```sh
 export OKF_ROOT=/path/to/wiki
 ```
+
+To enable autosave for a shared concept, add the `worklog-managed` tag and use
+one or more of these headings in its Markdown body: `Current state`,
+`Decisions`, `Verification`, `Next steps`, and `Recent changes`. The autosave
+plugin uses the active Claude subscription login, selects only opted-in
+concepts, and never creates session documents.
 
 The `english-lecturer` plugin runs automatically for Claude Code prompts after installation.

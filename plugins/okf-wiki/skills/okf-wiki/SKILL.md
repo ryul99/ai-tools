@@ -13,6 +13,7 @@ Use `okf` for structural and metadata operations while keeping Markdown files au
 - For bundle creation, concept authoring, frontmatter, and tags, read [references/authoring-workflow.md](references/authoring-workflow.md).
 - For sources, citations, verification, trust, and lifecycle state, read [references/provenance-lifecycle.md](references/provenance-lifecycle.md).
 - For validation, link checks, citation checks, diagnostics, and CI behavior, read [references/validation-diagnostics.md](references/validation-diagnostics.md).
+- For the optional Claude Code autosave companion, managed shared documents, and automatic update boundaries, read [references/autosave.md](references/autosave.md).
 - Before moving any concept, read and follow [references/safe-move.md](references/safe-move.md) completely.
 
 Read only the references needed for the current request.
