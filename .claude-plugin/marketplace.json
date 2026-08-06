@@ -16,6 +16,12 @@
       "name": "council",
       "source": "./plugins/council",
       "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response"
+    },
+    {
+      "name": "okf-wiki",
+      "source": "./plugins/okf-wiki",
+      "description": "Inspect, author, validate, and safely refactor Open Knowledge Format wikis with the okf CLI",
+      "version": "0.1.0"
     }
   ]
 }

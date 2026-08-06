@@ -1,0 +1,12 @@
+{
+  "name": "okf-wiki",
+  "description": "Inspect, author, validate, and safely refactor file-based Open Knowledge Format wikis with the okf CLI.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["okf", "wiki", "knowledge-management", "markdown"],
+  "skills": "./skills/"
+}
