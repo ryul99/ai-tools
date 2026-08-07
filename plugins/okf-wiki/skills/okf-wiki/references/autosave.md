@@ -47,8 +47,10 @@ automation:
 ## Journal work in the worklog directory
 
 Autosave also keeps an automatic work journal. When a turn contains meaningful
-work, it appends a timestamped entry to a worklog concept inside a dedicated
-bundle-relative directory (`worklog/` by default). Work continuing an existing
+work, it appends a bullet entry under a per-day `## YYYY-MM-DD` heading at the
+end of a worklog concept inside a dedicated bundle-relative directory
+(`worklog/` by default); same-day entries share one heading, so the body reads
+as an ascending daily timeline. Work continuing an existing
 worklog reuses that concept's slug — the planner sees the full slug index and
 the most relevant worklog bodies — while new work creates a new concept via
 `okf new` with type `Worklog` and tag `autosave-worklog`.

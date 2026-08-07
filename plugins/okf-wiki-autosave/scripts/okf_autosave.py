@@ -333,7 +333,7 @@ A dedicated worklog directory is also enabled. The required "worklog" field appe
 - worklogs.index lists every existing worklog slug with its title; worklogs.details holds the worklogs most relevant to the evidence, with a body excerpt.
 - When the turn continues the task of any worklog in worklogs.index, reuse that slug — prefer reusing an existing slug over creating a new one. Only when nothing matches, choose a new short kebab-case slug naming the task.
 - "title" is a short human-readable task title, used only when the worklog is first created.
-- "entry" is a concise Markdown summary of this turn only: what was done, key decisions, and real outcomes. Do not repeat facts already visible in that worklog's body_tail.
+- "entry" is a concise Markdown summary of this turn only: what was done, key decisions, and real outcomes. It is stored as bullet items under a per-day date heading, so write one short summary line or a few "- " bullets. Do not repeat facts already visible in that worklog's body_tail.
 """
     payload = json.dumps(
         {
@@ -652,10 +652,23 @@ def load_worklog_context(root: Path, worklog_dir: str, evidence: str) -> dict[st
     return context
 
 
+def worklog_bullets(entry: str) -> str:
+    lines = entry.split("\n")
+    if lines[0].lstrip().startswith(("- ", "* ")):
+        return entry
+    formatted = [f"- {lines[0].strip()}"]
+    formatted.extend(f"  {line}" for line in lines[1:])
+    return "\n".join(formatted)
+
+
 def append_worklog_entry(body: str, stamp: str, entry: str) -> str:
     clean = entry.strip().replace("\r\n", "\n").replace("\r", "\n")[:MAX_WORKLOG_ENTRY_CHARS]
-    section = f"## {stamp}\n\n{clean}\n"
+    bullets = worklog_bullets(clean)
     trimmed = body.rstrip()
+    matches = heading_matches(trimmed)
+    if matches and matches[-1][2] == 2 and matches[-1][3] == stamp:
+        return f"{trimmed}\n{bullets}\n"
+    section = f"## {stamp}\n\n{bullets}\n"
     return f"{trimmed}\n\n{section}" if trimmed else section
 
 
@@ -704,7 +717,7 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
         body = body_bytes.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise AutosaveError(f"worklog body is not UTF-8: {concept_id}") from exc
-    stamp = time.strftime("%Y-%m-%d %H:%M")
+    stamp = time.strftime("%Y-%m-%d")
     proposed = prefix + append_worklog_entry(body, stamp, entry).encode("utf-8")
     try:
         atomic_write(path, proposed, file_hash(original))

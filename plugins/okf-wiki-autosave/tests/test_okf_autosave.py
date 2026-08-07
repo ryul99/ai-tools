@@ -39,22 +39,40 @@ class AutosaveBodyTests(unittest.TestCase):
 
 
 class WorklogTests(unittest.TestCase):
-    def test_appends_a_timestamped_entry_after_existing_content(self) -> None:
-        body = "## 2026-08-06 10:00\n\nStarted the task.\n"
-        updated = MODULE.append_worklog_entry(body, "2026-08-07 09:30", "Finished the task.")
+    def test_starts_a_new_day_heading_after_an_older_day(self) -> None:
+        body = "## 2026-08-06\n\n- Started the task.\n"
+        updated = MODULE.append_worklog_entry(body, "2026-08-07", "Finished the task.")
         self.assertEqual(
             updated,
-            "## 2026-08-06 10:00\n\nStarted the task.\n\n"
-            "## 2026-08-07 09:30\n\nFinished the task.\n",
+            "## 2026-08-06\n\n- Started the task.\n\n"
+            "## 2026-08-07\n\n- Finished the task.\n",
+        )
+
+    def test_appends_a_bullet_under_the_current_day_heading(self) -> None:
+        body = "## 2026-08-07\n\n- First step.\n"
+        updated = MODULE.append_worklog_entry(body, "2026-08-07", "Second step.")
+        self.assertEqual(updated, "## 2026-08-07\n\n- First step.\n- Second step.\n")
+
+    def test_legacy_timestamp_heading_gets_a_fresh_day_heading(self) -> None:
+        body = "## 2026-08-07 09:30\n\nOld-format entry.\n"
+        updated = MODULE.append_worklog_entry(body, "2026-08-07", "New entry.")
+        self.assertEqual(
+            updated,
+            "## 2026-08-07 09:30\n\nOld-format entry.\n\n"
+            "## 2026-08-07\n\n- New entry.\n",
         )
 
     def test_appends_the_first_entry_to_an_empty_body(self) -> None:
-        updated = MODULE.append_worklog_entry("", "2026-08-07 09:30", "First entry.")
-        self.assertEqual(updated, "## 2026-08-07 09:30\n\nFirst entry.\n")
+        updated = MODULE.append_worklog_entry("", "2026-08-07", "First entry.")
+        self.assertEqual(updated, "## 2026-08-07\n\n- First entry.\n")
 
-    def test_normalizes_entry_line_endings(self) -> None:
-        updated = MODULE.append_worklog_entry("", "2026-08-07 09:30", "One.\r\nTwo.")
-        self.assertEqual(updated, "## 2026-08-07 09:30\n\nOne.\nTwo.\n")
+    def test_normalizes_entry_line_endings_and_indents_continuations(self) -> None:
+        updated = MODULE.append_worklog_entry("", "2026-08-07", "One.\r\nTwo.")
+        self.assertEqual(updated, "## 2026-08-07\n\n- One.\n  Two.\n")
+
+    def test_keeps_entries_that_are_already_bullets(self) -> None:
+        updated = MODULE.append_worklog_entry("", "2026-08-07", "- One.\n- Two.")
+        self.assertEqual(updated, "## 2026-08-07\n\n- One.\n- Two.\n")
 
     def test_default_worklog_directory(self) -> None:
         with unittest.mock.patch.dict(os.environ, {}, clear=False):

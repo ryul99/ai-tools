@@ -28,9 +28,12 @@ update at most three concepts per turn.
 ## Worklog journaling
 
 When a turn contains meaningful work (code changes, debugging with
-conclusions, decisions), the hook also appends a timestamped journal entry to
-a worklog concept. Worklogs live only inside a dedicated directory under the
-bundle root (`worklog/` by default) and are tagged `autosave-worklog`.
+conclusions, decisions), the hook also appends a journal entry to a worklog
+concept. Entries are bullet items grouped under one `## YYYY-MM-DD` heading
+per day, appended in chronological order; a turn on an already-journaled day
+adds a bullet under the existing day heading. Worklogs live only inside a
+dedicated directory under the bundle root (`worklog/` by default) and are
+tagged `autosave-worklog`.
 
 - Work that continues an existing worklog is appended to the same concept; new
   work creates a new concept with a new slug. The full slug index plus the
