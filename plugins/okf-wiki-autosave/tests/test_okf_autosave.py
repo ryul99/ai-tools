@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
+import subprocess
+import tempfile
 import unittest
 import unittest.mock
 from pathlib import Path
@@ -36,6 +39,47 @@ class AutosaveBodyTests(unittest.TestCase):
     def test_rejects_an_escaping_concept_id(self) -> None:
         with self.assertRaises(MODULE.AutosaveError):
             MODULE.safe_concept_path(Path("/tmp/wiki"), "../outside")
+
+    def test_reads_codex_event_messages_from_a_transcript(self) -> None:
+        records = [
+            {
+                "type": "event_msg",
+                "payload": {"type": "user_message", "message": "Implement Codex hooks."},
+            },
+            {
+                "type": "event_msg",
+                "payload": {"type": "agent_message", "message": "Implemented and tested."},
+            },
+        ]
+        with tempfile.TemporaryDirectory() as temporary:
+            transcript = Path(temporary) / "rollout.jsonl"
+            transcript.write_text(
+                "".join(json.dumps(record) + "\n" for record in records),
+                encoding="utf-8",
+            )
+            messages = MODULE.transcript_tail(str(transcript))
+        self.assertEqual(
+            messages,
+            [
+                {"role": "user", "content": "Implement Codex hooks."},
+                {"role": "assistant", "content": "Implemented and tested."},
+            ],
+        )
+
+    def test_falls_back_to_codex_response_items(self) -> None:
+        record = {
+            "type": "response_item",
+            "payload": {
+                "type": "message",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "Finished."}],
+            },
+        }
+        with tempfile.TemporaryDirectory() as temporary:
+            transcript = Path(temporary) / "rollout.jsonl"
+            transcript.write_text(json.dumps(record) + "\n", encoding="utf-8")
+            messages = MODULE.transcript_tail(str(transcript))
+        self.assertEqual(messages, [{"role": "assistant", "content": "Finished."}])
 
 
 class WorklogTests(unittest.TestCase):
@@ -145,6 +189,85 @@ class WorklogTests(unittest.TestCase):
         self.assertIn("worklog", with_worklog["properties"])
         self.assertIn("worklog", with_worklog["required"])
         self.assertNotIn("operations", with_worklog["properties"])
+
+
+class PlannerRuntimeTests(unittest.TestCase):
+    def test_auto_runtime_uses_codex_for_a_codex_plugin_hook(self) -> None:
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PLUGIN_ROOT": "/tmp/plugin", "OKF_AUTOSAVE_CLI": "auto"},
+        ):
+            self.assertEqual(MODULE.planner_runtime(), "codex")
+
+    def test_auto_runtime_keeps_claude_compatibility(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {"OKF_AUTOSAVE_CLI": "auto"}):
+            os.environ.pop("PLUGIN_ROOT", None)
+            self.assertEqual(MODULE.planner_runtime(), "claude")
+
+    def test_runtime_can_be_overridden(self) -> None:
+        with unittest.mock.patch.dict(
+            os.environ,
+            {"PLUGIN_ROOT": "/tmp/plugin", "OKF_AUTOSAVE_CLI": "claude"},
+        ):
+            self.assertEqual(MODULE.planner_runtime(), "claude")
+
+    def test_codex_planner_uses_isolated_read_only_structured_run(self) -> None:
+        expected = {"material_change": False}
+
+        def fake_run(command, **kwargs):
+            schema_path = Path(command[command.index("--output-schema") + 1])
+            schema = json.loads(schema_path.read_text(encoding="utf-8"))
+            self.assertEqual(schema["required"], ["material_change"])
+            self.assertTrue(kwargs["cwd"].is_dir())
+            self.assertEqual(kwargs["input_text"], '{"evidence":{}}')
+            self.assertEqual(kwargs["env"]["OKF_AUTOSAVE_CHILD"], "1")
+            self.assertNotIn("OPENAI_API_KEY", kwargs["env"])
+            return subprocess.CompletedProcess(command, 0, json.dumps(expected), "")
+
+        with unittest.mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/codex"):
+            with unittest.mock.patch.object(MODULE, "run_process", side_effect=fake_run) as run:
+                with unittest.mock.patch.dict(
+                    os.environ,
+                    {
+                        "OPENAI_API_KEY": "secret",
+                        "OKF_AUTOSAVE_CODEX_MODEL": "codex-test-model",
+                    },
+                ):
+                    actual = MODULE.request_codex_plan(
+                        "Return JSON.",
+                        '{"evidence":{}}',
+                        MODULE.update_schema([], False),
+                    )
+
+        self.assertEqual(actual, expected)
+        command = run.call_args.args[0]
+        self.assertEqual(command[:2], ["/usr/bin/codex", "exec"])
+        self.assertIn("--ephemeral", command)
+        self.assertIn("--ignore-user-config", command)
+        self.assertIn("read-only", command)
+        self.assertEqual(command[command.index("--model") + 1], "codex-test-model")
+
+    def test_claude_planner_keeps_structured_output_wrapper(self) -> None:
+        expected = {"material_change": False}
+        response = json.dumps({"structured_output": expected})
+        completed = subprocess.CompletedProcess([], 0, response, "")
+        with unittest.mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/claude"):
+            with unittest.mock.patch.object(MODULE, "run_process", return_value=completed) as run:
+                with unittest.mock.patch.dict(
+                    os.environ,
+                    {"OKF_AUTOSAVE_CLAUDE_MODEL": "claude-test-model"},
+                ):
+                    actual = MODULE.request_claude_plan(
+                        Path("/tmp/wiki"),
+                        "Return JSON.",
+                        '{"evidence":{}}',
+                        MODULE.update_schema([], False),
+                    )
+
+        self.assertEqual(actual, expected)
+        command = run.call_args.args[0]
+        self.assertEqual(command[0], "/usr/bin/claude")
+        self.assertEqual(command[command.index("--model") + 1], "claude-test-model")
 
 
 if __name__ == "__main__":

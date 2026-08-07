@@ -27,6 +27,30 @@
         "authentication": "ON_INSTALL"
       },
       "category": "Productivity"
+    },
+    {
+      "name": "english-lecturer",
+      "source": {
+        "source": "local",
+        "path": "./plugins/english-lecturer"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
+    },
+    {
+      "name": "okf-wiki-autosave",
+      "source": {
+        "source": "local",
+        "path": "./plugins/okf-wiki-autosave"
+      },
+      "policy": {
+        "installation": "AVAILABLE",
+        "authentication": "ON_INSTALL"
+      },
+      "category": "Productivity"
     }
   ]
 }

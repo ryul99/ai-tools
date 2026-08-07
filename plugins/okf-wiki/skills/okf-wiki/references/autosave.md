@@ -1,8 +1,10 @@
 # Optional Autosave Companion
 
-The base `okf-wiki` plugin does not install hooks. Claude Code users may
-separately install `okf-wiki-autosave`, which depends on the base plugin and
-runs a Stop hook after main-agent turns.
+The base `okf-wiki` plugin does not install hooks. Codex and Claude Code users
+may separately install `okf-wiki-autosave`, which runs a Stop hook after
+main-agent turns. Claude Code installs the declared base-plugin dependency;
+Codex users install both plugins explicitly and trust the hook through
+`/hooks`.
 
 ## Opt in shared documents
 
@@ -64,9 +66,11 @@ manually.
 ## Understand update behavior
 
 The hook reads the current turn and workspace state transiently, retrieves
-candidate concepts with `okf`, and invokes `claude -p` with a JSON Schema. The
-child process uses the current Claude subscription login and returns a bounded
-section-update plan. It has no tools and cannot write files.
+candidate concepts with `okf`, and invokes the host CLI with a JSON Schema.
+Claude Code uses a tool-free `claude -p` child; Codex uses an ephemeral
+`codex exec` child in an isolated directory with hooks and user config disabled
+and a read-only sandbox. The child uses the matching subscription login and
+returns a bounded section-update plan.
 
 The deterministic writer enforces candidate IDs, allowed headings, confidence,
 content hashes, and atomic writes. It validates bodies, links, and citations
@@ -75,8 +79,10 @@ content fingerprints in plugin data; they contain no session ID or transcript.
 
 ## Configure operation
 
-- Set `OKF_ROOT` when Claude Code runs outside the target bundle.
-- Set `OKF_AUTOSAVE_MODEL` to override the default `sonnet` model.
+- Set `OKF_ROOT` when the agent runs outside the target bundle.
+- Set `OKF_AUTOSAVE_CLAUDE_MODEL` to override the Claude default `sonnet` model.
+- Set `OKF_AUTOSAVE_CODEX_MODEL` to override the current Codex default model.
+- Set `OKF_AUTOSAVE_CLI` to `claude` or `codex` to override host detection.
 - Set `OKF_AUTOSAVE_MIN_CONFIDENCE` to override the default `0.85` threshold.
 - Set `OKF_AUTOSAVE_MAX_CANDIDATES` to change the default candidate limit of 8.
 - Set `OKF_AUTOSAVE_WORKLOG_DIR` to change the worklog directory (default

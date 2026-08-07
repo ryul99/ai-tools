@@ -1,0 +1,38 @@
+{
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "enhanced_prompt": {
+      "type": "string",
+      "description": "The improved prompt preserving original meaning"
+    },
+    "has_corrections": {
+      "type": "boolean",
+      "description": "Whether the original prompt had any issues to improve"
+    },
+    "corrections": {
+      "type": "array",
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "original": { "type": "string" },
+          "suggestion": { "type": "string" },
+          "category": {
+            "type": "string",
+            "enum": ["grammar", "vocabulary", "style", "spelling", "word_order"]
+          },
+          "explanation": { "type": "string" }
+        },
+        "required": ["original", "suggestion", "category", "explanation"]
+      },
+      "description": "Gentle improvement suggestions, max 3 items"
+    },
+    "tip": {
+      "type": "string",
+      "description": "One concise learning tip"
+    }
+  },
+  "required": ["enhanced_prompt", "has_corrections", "corrections", "tip"]
+}

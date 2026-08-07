@@ -1,0 +1,24 @@
+{
+  "name": "english-lecturer",
+  "version": "1.0.4",
+  "description": "Corrects English prompts and provides brief language feedback after submission.",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["english", "writing", "feedback", "hooks"],
+  "interface": {
+    "displayName": "English Lecturer",
+    "shortDescription": "Get feedback on English prompts.",
+    "longDescription": "Reviews submitted English prompts, suggests a clearer rewrite, and explains a few useful corrections in Korean.",
+    "developerName": "ryul99",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "websiteURL": "https://github.com/ryul99/ai-tools",
+    "defaultPrompt": [
+      "Help me improve the English in my prompts."
+    ]
+  }
+}

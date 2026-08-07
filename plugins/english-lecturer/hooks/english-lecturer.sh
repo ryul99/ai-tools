@@ -1,7 +1,11 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # acknowledge: https://github.com/crescent-stdio for prompt
 
 INPUT="$(cat)"
+
+if [[ "${ENGLISH_LECTURER_CHILD:-}" == "1" ]]; then
+    exit 0
+fi
 
 # Ignore subagent response
 if [[ "$(echo "$INPUT" | jq -r '.agent_id // .agent_type // empty')" != "" ]]; then
@@ -16,44 +20,10 @@ if [[ "$INPUT_PROMPT" == "<task-notification>"* ]]; then
 fi
 
 TARGET_LANGUAGE="Korean"
-
-JSON_SCHEMA='
-{
-    "type": "object",
-    "properties": {
-        "enhanced_prompt": {
-            "type": "string",
-            "description": "The improved prompt preserving original meaning"
-        },
-        "has_corrections": {
-            "type": "boolean",
-            "description": "Whether the original prompt had any issues to improve"
-        },
-        "corrections": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "original": { "type": "string" },
-                    "suggestion": { "type": "string" },
-                    "category": {
-                        "type": "string",
-                        "enum": ["grammar", "vocabulary", "style", "spelling", "word_order"]
-                    },
-                    "explanation": { "type": "string" }
-                },
-                "required": ["original", "suggestion", "category", "explanation"]
-            },
-            "description": "Gentle improvement suggestions, max 3 items"
-        },
-        "tip": {
-            "type": "string",
-            "description": "One concise learning tip"
-        }
-    },
-    "required": ["enhanced_prompt", "has_corrections", "corrections", "tip"]
-}
-'
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PLUGIN_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+SCHEMA_PATH="$PLUGIN_DIR/schemas/response.json"
+JSON_SCHEMA="$(<"$SCHEMA_PATH")"
 
 INPUT_PROMPT="\
 You are a supportive, encouraging English coach for a $TARGET_LANGUAGE developer. Analyze the prompt below and return structured JSON.
@@ -76,27 +46,65 @@ $INPUT_PROMPT
 "
 
 hook_output() {
-    printf '%s' "$1" | jq -Rs '{ suppressOutput: false, systemMessage: . }'
+    if [[ -n "${PLUGIN_ROOT:-}" ]]; then
+        printf '%s' "$1" | jq -Rs '{ systemMessage: . }'
+    else
+        printf '%s' "$1" | jq -Rs '{ suppressOutput: false, systemMessage: . }'
+    fi
 }
 
-RESPONSE="$( \
-    CLAUDE_CODE_EFFORT_LEVEL=low MAX_THINKING_TOKENS=2000 \
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
-    CLAUDE_CODE_SIMPLE=0 \
-    claude \
-    --tools='' \
-    --strict-mcp-config \
-    --no-session-persistence \
-    --safe-mode \
-    --disable-slash-commands \
-    --model haiku \
-    --settings '{ "disableAllHooks": true }' \
-    --output-format json \
-    --json-schema "$JSON_SCHEMA" \
-    -p "$INPUT_PROMPT"
-)"
+ERROR_FILE="$(mktemp "${TMPDIR:-/tmp}/english-lecturer.XXXXXX")"
+trap 'rm -f "$ERROR_FILE"' EXIT
 
-STRUCTURED_OUTPUT="$(echo "$RESPONSE" | jq -r '.structured_output')"
+if [[ -n "${PLUGIN_ROOT:-}" ]]; then
+    CODEX_COMMAND=(
+        codex exec
+        --ephemeral
+        --ignore-user-config
+        --disable hooks
+        --sandbox read-only
+        --skip-git-repo-check
+        --output-schema "$SCHEMA_PATH"
+        --config 'model_reasoning_effort="low"'
+    )
+    if [[ -n "${ENGLISH_LECTURER_CODEX_MODEL:-}" ]]; then
+        CODEX_COMMAND+=(--model "$ENGLISH_LECTURER_CODEX_MODEL")
+    fi
+    if ! RESPONSE="$(
+        printf '%s' "$INPUT_PROMPT" |
+            ENGLISH_LECTURER_CHILD=1 "${CODEX_COMMAND[@]}" - 2>"$ERROR_FILE"
+    )"; then
+        ERROR_DETAIL="$(<"$ERROR_FILE")"
+        hook_output "Failed to generate lesson with Codex: ${ERROR_DETAIL:-unknown error}"
+        exit 0
+    fi
+    STRUCTURED_OUTPUT="$RESPONSE"
+else
+    CLAUDE_MODEL="${ENGLISH_LECTURER_CLAUDE_MODEL:-haiku}"
+    if ! RESPONSE="$(
+        CLAUDE_CODE_EFFORT_LEVEL=low MAX_THINKING_TOKENS=2000 \
+        CLAUDE_CODE_DISABLE_AUTO_MEMORY=1 \
+        CLAUDE_CODE_SIMPLE=0 \
+        ENGLISH_LECTURER_CHILD=1 \
+        claude \
+        --tools='' \
+        --strict-mcp-config \
+        --no-session-persistence \
+        --safe-mode \
+        --disable-slash-commands \
+        --model "$CLAUDE_MODEL" \
+        --settings '{ "disableAllHooks": true }' \
+        --output-format json \
+        --json-schema "$JSON_SCHEMA" \
+        -p "$INPUT_PROMPT" \
+        2>"$ERROR_FILE"
+    )"; then
+        ERROR_DETAIL="$(<"$ERROR_FILE")"
+        hook_output "Failed to generate lesson with Claude: ${ERROR_DETAIL:-unknown error}"
+        exit 0
+    fi
+    STRUCTURED_OUTPUT="$(echo "$RESPONSE" | jq -r '.structured_output')"
+fi
 
 if [[ -z "$STRUCTURED_OUTPUT" || "$STRUCTURED_OUTPUT" == "null" ]]; then
     ERROR_DETAIL="$(echo "$RESPONSE" | jq -r '.result // "unknown error"')"

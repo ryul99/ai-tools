@@ -1,10 +1,21 @@
 # OKF Wiki Autosave
 
-This optional Claude Code companion keeps shared OKF concepts current after
-main-agent turns and journals meaningful work into a dedicated worklog
+This optional Codex and Claude Code companion keeps shared OKF concepts current
+after main-agent turns and journals meaningful work into a dedicated worklog
 directory.
 
-Install the base plugin without hooks:
+For Codex, install both the base and autosave plugins:
+
+```sh
+codex plugin add okf-wiki@ryul99-ai-tools
+codex plugin add okf-wiki-autosave@ryul99-ai-tools
+```
+
+Then open `/hooks` and trust the plugin hook definition. Codex requires this
+review for non-managed hooks and repeats it whenever the hook definition
+changes.
+
+For Claude Code, install the base plugin without hooks:
 
 ```sh
 claude plugin install okf-wiki@ryul99-ai-tools
@@ -16,9 +27,9 @@ Install autosave and its base-plugin dependency:
 claude plugin install okf-wiki-autosave@ryul99-ai-tools
 ```
 
-The hook requires `okf` and `claude` on `PATH`, an active Claude subscription
-login, and either an OKF bundle in the current directory hierarchy or an
-`OKF_ROOT` value.
+The hook requires `okf` and the host CLI (`codex` or `claude`) on `PATH`, an
+active matching subscription login, and either an OKF bundle in the current
+directory hierarchy or an `OKF_ROOT` value.
 
 ## Shared document updates
 
@@ -52,7 +63,14 @@ Configuration:
 - `OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE` overrides the journaling confidence
   threshold (default `0.6`).
 
-The child `claude -p` process runs in safe mode without tools, plugins, hooks,
-skills, or session persistence. API-key, gateway, and cloud-provider routing
-environment variables are removed from that child so the active subscription
-OAuth credential is used.
+The child planner uses the same CLI as the host. Claude Code runs `claude -p`
+in safe mode without tools, plugins, hooks, skills, or session persistence.
+Codex runs `codex exec` ephemerally from an isolated directory with hooks and
+user config disabled, a read-only sandbox, and a JSON output schema. Matching
+API-key, gateway, and cloud-provider routing environment variables are removed
+from the child so the active subscription credential is used.
+
+Set `OKF_AUTOSAVE_CLAUDE_MODEL` to override the Claude model (default `sonnet`)
+or `OKF_AUTOSAVE_CODEX_MODEL` to select a Codex model (the Codex default is
+used when unset). `OKF_AUTOSAVE_CLI=claude|codex` overrides automatic host
+detection.

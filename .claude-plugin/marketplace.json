@@ -4,7 +4,7 @@
     "name": "ryul99"
   },
   "metadata": {
-    "description": "ryul99's AI tools for Claude Code"
+    "description": "ryul99's AI tools for Codex and Claude Code"
   },
   "plugins": [
     {
@@ -25,7 +25,7 @@
     {
       "name": "okf-wiki-autosave",
       "source": "./plugins/okf-wiki-autosave",
-      "description": "Automatically maintain opted-in shared OKF documents and journal work into a dedicated worklog directory when Claude Code finishes a turn"
+      "description": "Automatically maintain opted-in shared OKF documents and journal work into a dedicated worklog directory when an agent finishes a turn"
     }
   ]
 }

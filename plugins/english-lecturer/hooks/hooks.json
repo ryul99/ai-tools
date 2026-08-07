@@ -1,0 +1,17 @@
+{
+  "description": "Correct submitted English prompts and provide brief language feedback.",
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/english-lecturer.sh",
+            "timeout": 120,
+            "statusMessage": "Reviewing English prompt"
+          }
+        ]
+      }
+    ]
+  }
+}
