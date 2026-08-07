@@ -20,14 +20,12 @@
     {
       "name": "okf-wiki",
       "source": "./plugins/okf-wiki",
-      "description": "Inspect, author, validate, and safely refactor Open Knowledge Format wikis with the okf CLI",
-      "version": "0.2.0"
+      "description": "Inspect, author, validate, and safely refactor Open Knowledge Format wikis with the okf CLI"
     },
     {
       "name": "okf-wiki-autosave",
       "source": "./plugins/okf-wiki-autosave",
-      "description": "Automatically maintain opted-in shared OKF documents when Claude Code finishes a turn",
-      "version": "0.2.1"
+      "description": "Automatically maintain opted-in shared OKF documents when Claude Code finishes a turn"
     }
   ]
 }
