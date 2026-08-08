@@ -25,7 +25,7 @@
     {
       "name": "okf-wiki-autosave",
       "source": "./plugins/okf-wiki-autosave",
-      "description": "Automatically maintain opted-in shared OKF documents and journal work into a dedicated worklog directory when an agent finishes a turn"
+      "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when an agent finishes a turn"
     }
   ]
 }

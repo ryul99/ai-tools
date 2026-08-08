@@ -4,5 +4,8 @@
   "version": "1.0.4",
   "author": {
     "name": "ryul99"
-  }
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["english", "writing", "feedback", "hooks"]
 }
