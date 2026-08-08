@@ -57,12 +57,11 @@ The `okf-wiki` plugin expects the `okf` CLI to be installed. Run it inside a wik
 export OKF_ROOT=/path/to/wiki
 ```
 
-To enable autosave for a shared concept, add the `worklog-managed` tag and use
-one or more of these headings in its Markdown body: `Current state`,
-`Decisions`, `Verification`, `Next steps`, and `Recent changes`. The autosave
-plugin uses the active subscription login for the host that runs it (`codex`
-from Codex and `claude` from Claude Code), selects only opted-in concepts, and
-never creates session documents.
+The autosave plugin journals meaningful work into dedicated worklog concepts
+under the bundle-relative `worklog/` directory. It uses the active
+subscription login for the host that runs it (`codex` from Codex and `claude`
+from Claude Code), never writes outside the worklog directory, and never
+creates session documents.
 
 The `english-lecturer` plugin runs automatically for Codex and Claude Code
 prompts after installation. Codex also requires the `/hooks` trust approval

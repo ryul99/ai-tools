@@ -1,7 +1,7 @@
 {
   "name": "okf-wiki-autosave",
-  "version": "0.4.2",
-  "description": "Maintains opted-in shared OKF documents and journals meaningful work after turns.",
+  "version": "0.5.0",
+  "description": "Journals meaningful work into dedicated OKF worklog concepts after turns.",
   "author": {
     "name": "ryul99",
     "url": "https://github.com/ryul99"
@@ -11,14 +11,14 @@
   "keywords": ["okf", "wiki", "autosave", "hooks", "knowledge-management"],
   "interface": {
     "displayName": "OKF Wiki Autosave",
-    "shortDescription": "Keep opted-in OKF work notes current.",
-    "longDescription": "Updates explicitly managed OKF concepts and appends meaningful work to validated, dedicated worklog concepts when a turn ends.",
+    "shortDescription": "Journal work into OKF worklog concepts.",
+    "longDescription": "Appends meaningful work to validated, dedicated OKF worklog concepts when a turn ends.",
     "developerName": "ryul99",
     "category": "Productivity",
     "capabilities": ["Write"],
     "websiteURL": "https://github.com/ryul99/ai-tools",
     "defaultPrompt": [
-      "Explain how to opt an OKF concept into autosave."
+      "Explain how the OKF autosave worklog journaling works."
     ]
   }
 }

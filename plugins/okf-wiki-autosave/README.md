@@ -1,8 +1,7 @@
 # OKF Wiki Autosave
 
-This optional Codex and Claude Code companion keeps shared OKF concepts current
-after main-agent turns and journals meaningful work into a dedicated worklog
-directory.
+This optional Codex and Claude Code companion journals meaningful work into a
+dedicated worklog directory after main-agent turns.
 
 For Codex, install both the base and autosave plugins:
 
@@ -31,25 +30,17 @@ The hook requires `okf` and the host CLI (`codex` or `claude`) on `PATH`, an
 active matching subscription login, and either an OKF bundle in the current
 directory hierarchy or an `OKF_ROOT` value.
 
-## Shared document updates
-
-Section updates only consider existing concepts tagged `worklog-managed` and
-update at most three concepts per turn. Planner-written content is sanitized
-before it lands in a document: Markdown heading lines inside section content
-or journal entries are demoted to bold text so they cannot collide with
-managed headings. If a document already contains duplicated managed headings
-(for example from earlier tool versions), the next update merges them back
-into a single section, keeping the first occurrence.
-
 ## Worklog journaling
 
 When a turn contains meaningful work (code changes, debugging with
-conclusions, decisions), the hook also appends a journal entry to a worklog
+conclusions, decisions), the hook appends a journal entry to a worklog
 concept. Entries are bullet items grouped under one `## YYYY-MM-DD` heading
 per day, appended in chronological order; a turn on an already-journaled day
 adds a bullet under the existing day heading. Worklogs live only inside a
 dedicated directory under the bundle root (`worklog/` by default) and are
-tagged `autosave-worklog`.
+tagged `autosave-worklog`. Planner-written content is sanitized before it
+lands in a document: Markdown heading lines inside journal entries are demoted
+to bold text so they cannot collide with the per-day date headings.
 
 - Work that continues an existing worklog is appended to the same concept; new
   work creates a new concept with a new slug. The full slug index plus the
@@ -67,6 +58,16 @@ Configuration:
   (default `worklog`). Set it to an empty string to disable journaling.
 - `OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE` overrides the journaling confidence
   threshold (default `0.6`).
+
+## Autonomous turns
+
+Turns triggered by the system rather than a typed prompt — background task
+notifications, Monitor events, scheduled wakeups, peer-agent messages — are
+skipped automatically, so long autonomous runs do not flood the worklog. The
+detection reads the origin of the newest prompt in the Claude Code transcript;
+these fields are undocumented, so if they ever disappear the hook fails open
+and journals normally. Codex rollouts carry no origin marker and are always
+treated as human-triggered.
 
 The child planner uses the same CLI as the host. Claude Code runs `claude -p`
 in safe mode without tools, plugins, hooks, skills, or session persistence.

@@ -17,47 +17,6 @@ SPEC.loader.exec_module(MODULE)
 
 
 class AutosaveBodyTests(unittest.TestCase):
-    def test_replaces_one_section_and_preserves_the_next(self) -> None:
-        body = "# Current state\n\nOld.\n\n# Decisions\n\nKeep.\n"
-        updated = MODULE.replace_section(body, "Current state", "New.")
-        self.assertEqual(updated, "# Current state\n\nNew.\n\n# Decisions\n\nKeep.\n")
-
-    def test_appends_a_missing_section(self) -> None:
-        body = "# Current state\n\nReady.\n"
-        updated = MODULE.replace_section(body, "Next steps", "Ship it.")
-        self.assertEqual(
-            updated,
-            "# Current state\n\nReady.\n\n# Next steps\n\nShip it.\n",
-        )
-
-    def test_merges_duplicate_sections_instead_of_failing(self) -> None:
-        body = (
-            "# Current state\n\nOld.\n\n"
-            "# Next steps\n\n- Newest plan.\n\n"
-            "# Next steps\n\n- Stale copy.\n\n"
-            "# Next steps\n\n- Older copy.\n\n"
-            "# Log\n\n## 2026-08-07\n\n- Entry.\n"
-        )
-        updated = MODULE.replace_section(body, "Next steps", "- Fresh plan.")
-        self.assertEqual(
-            updated,
-            "# Current state\n\nOld.\n\n"
-            "# Next steps\n\n- Fresh plan.\n\n"
-            "# Log\n\n## 2026-08-07\n\n- Entry.\n",
-        )
-
-    def test_ignores_deeper_headings_with_the_managed_title(self) -> None:
-        body = (
-            "# Next steps\n\n- Real section.\n\n"
-            "# Log\n\n### Next steps\n\n- Just a journal sub-heading.\n"
-        )
-        updated = MODULE.replace_section(body, "Next steps", "- Replaced.")
-        self.assertEqual(
-            updated,
-            "# Next steps\n\n- Replaced.\n\n"
-            "# Log\n\n### Next steps\n\n- Just a journal sub-heading.\n",
-        )
-
     def test_demotes_heading_lines_to_bold_text(self) -> None:
         text = "- Did work.\n# Next steps\n- Follow up.\n  ## Indented ##\nplain # not a heading"
         self.assertEqual(
@@ -92,7 +51,7 @@ class AutosaveBodyTests(unittest.TestCase):
                 "".join(json.dumps(record) + "\n" for record in records),
                 encoding="utf-8",
             )
-            messages = MODULE.transcript_tail(str(transcript))
+            messages = MODULE.transcript_tail(MODULE.read_transcript_bytes(str(transcript)))
         self.assertEqual(
             messages,
             [
@@ -113,7 +72,7 @@ class AutosaveBodyTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary:
             transcript = Path(temporary) / "rollout.jsonl"
             transcript.write_text(json.dumps(record) + "\n", encoding="utf-8")
-            messages = MODULE.transcript_tail(str(transcript))
+            messages = MODULE.transcript_tail(MODULE.read_transcript_bytes(str(transcript)))
         self.assertEqual(messages, [{"role": "assistant", "content": "Finished."}])
 
 
@@ -221,27 +180,75 @@ class WorklogTests(unittest.TestCase):
         self.assertEqual(context["details"][0]["slug"], "task-3")
         self.assertEqual(context["details"][0]["body_tail"], "Body text.")
 
-    def test_schema_requires_worklog_only_when_enabled(self) -> None:
-        without = MODULE.update_schema([], False)
-        self.assertNotIn("worklog", without["properties"])
-        with_worklog = MODULE.update_schema([], True)
-        self.assertIn("worklog", with_worklog["properties"])
-        self.assertIn("worklog", with_worklog["required"])
-        self.assertNotIn("operations", with_worklog["properties"])
+    def test_schema_requires_material_change_and_worklog(self) -> None:
+        schema = MODULE.update_schema()
+        self.assertEqual(schema["required"], ["material_change", "worklog"])
+        self.assertNotIn("operations", schema["properties"])
 
     def test_schema_worklog_is_nullable_via_anyof(self) -> None:
-        worklog = MODULE.update_schema([], True)["properties"]["worklog"]
+        worklog = MODULE.update_schema()["properties"]["worklog"]
         self.assertNotIn("type", worklog)
         variants = {json.dumps(item.get("type")) for item in worklog["anyOf"]}
         self.assertEqual(variants, {'"object"', '"null"'})
 
     def test_prompt_spells_out_the_noop_plan(self) -> None:
-        prompt = MODULE.planner_prompt(True, {"index": [], "details": []})
-        self.assertIn('{"material_change": false, "operations": [], "worklog": null}', prompt)
-        without_candidates = MODULE.planner_prompt(False, None)
-        self.assertIn('{"material_change": false}', without_candidates)
-        self.assertNotIn("operations", without_candidates)
+        prompt = MODULE.planner_prompt()
+        self.assertIn('{"material_change": false, "worklog": null}', prompt)
+        self.assertNotIn("operations", prompt)
 
+
+def user_record(text: str, origin_kind: str | None, prompt_source: str | None, **extra) -> str:
+    record: dict = {
+        "type": "user",
+        "message": {"role": "user", "content": [{"type": "text", "text": text}]},
+        "promptSource": prompt_source,
+    }
+    if origin_kind is not None:
+        record["origin"] = {"kind": origin_kind}
+    record.update(extra)
+    return json.dumps(record) + "\n"
+
+
+class SystemTriggeredTurnTests(unittest.TestCase):
+    def test_human_typed_prompt_is_not_system_triggered(self) -> None:
+        raw = user_record("fix the bug", "human", "typed").encode("utf-8")
+        self.assertFalse(MODULE.system_triggered_turn(raw))
+
+    def test_task_notification_prompt_is_system_triggered(self) -> None:
+        raw = user_record("<task-notification>...</task-notification>", "task-notification", "system").encode("utf-8")
+        self.assertTrue(MODULE.system_triggered_turn(raw))
+
+    def test_the_newest_prompt_decides(self) -> None:
+        raw = (
+            user_record("start the run", "human", "typed")
+            + user_record("<task-notification>monitor event</task-notification>", "task-notification", "system")
+        ).encode("utf-8")
+        self.assertTrue(MODULE.system_triggered_turn(raw))
+        raw = (
+            user_record("<task-notification>monitor event</task-notification>", "task-notification", "system")
+            + user_record("stop and summarize", "human", "queued")
+        ).encode("utf-8")
+        self.assertFalse(MODULE.system_triggered_turn(raw))
+
+    def test_meta_and_sidechain_records_are_ignored(self) -> None:
+        raw = (
+            user_record("<task-notification>event</task-notification>", "task-notification", "system")
+            + user_record("skill content", None, None, isMeta=True)
+            + user_record("subagent prompt", None, "typed", isSidechain=True)
+        ).encode("utf-8")
+        self.assertTrue(MODULE.system_triggered_turn(raw))
+
+    def test_missing_origin_falls_back_to_prompt_source(self) -> None:
+        self.assertTrue(MODULE.system_triggered_turn(user_record("event", None, "system").encode("utf-8")))
+        self.assertFalse(MODULE.system_triggered_turn(user_record("hello", None, None).encode("utf-8")))
+
+    def test_codex_rollouts_count_as_human(self) -> None:
+        record = {
+            "type": "event_msg",
+            "payload": {"type": "user_message", "message": "Implement Codex hooks."},
+        }
+        raw = (json.dumps(record) + "\n").encode("utf-8")
+        self.assertFalse(MODULE.system_triggered_turn(raw))
 
 class GitContextTests(unittest.TestCase):
     def test_skips_commands_that_time_out(self) -> None:
@@ -278,12 +285,12 @@ class PlannerRuntimeTests(unittest.TestCase):
             self.assertEqual(MODULE.planner_runtime(), "claude")
 
     def test_codex_planner_uses_isolated_read_only_structured_run(self) -> None:
-        expected = {"material_change": False}
+        expected = {"material_change": False, "worklog": None}
 
         def fake_run(command, **kwargs):
             schema_path = Path(command[command.index("--output-schema") + 1])
             schema = json.loads(schema_path.read_text(encoding="utf-8"))
-            self.assertEqual(schema["required"], ["material_change"])
+            self.assertEqual(schema["required"], ["material_change", "worklog"])
             self.assertTrue(kwargs["cwd"].is_dir())
             self.assertEqual(kwargs["input_text"], '{"evidence":{}}')
             self.assertEqual(kwargs["env"]["OKF_AUTOSAVE_CHILD"], "1")
@@ -302,7 +309,7 @@ class PlannerRuntimeTests(unittest.TestCase):
                     actual = MODULE.request_codex_plan(
                         "Return JSON.",
                         '{"evidence":{}}',
-                        MODULE.update_schema([], False),
+                        MODULE.update_schema(),
                     )
 
         self.assertEqual(actual, expected)
@@ -314,7 +321,7 @@ class PlannerRuntimeTests(unittest.TestCase):
         self.assertEqual(command[command.index("--model") + 1], "codex-test-model")
 
     def test_claude_planner_keeps_structured_output_wrapper(self) -> None:
-        expected = {"material_change": False}
+        expected = {"material_change": False, "worklog": None}
         response = json.dumps({"structured_output": expected})
         completed = subprocess.CompletedProcess([], 0, response, "")
         with unittest.mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/claude"):
@@ -327,7 +334,7 @@ class PlannerRuntimeTests(unittest.TestCase):
                         Path("/tmp/wiki"),
                         "Return JSON.",
                         '{"evidence":{}}',
-                        MODULE.update_schema([], False),
+                        MODULE.update_schema(),
                     )
 
         self.assertEqual(actual, expected)

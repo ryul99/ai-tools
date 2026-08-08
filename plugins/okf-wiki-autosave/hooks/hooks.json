@@ -1,5 +1,5 @@
 {
-  "description": "Maintain opted-in shared OKF documents after agent turns.",
+  "description": "Journal meaningful work into OKF worklog concepts after agent turns.",
   "hooks": {
     "Stop": [
       {
@@ -8,7 +8,7 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_autosave.py\" --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 120,
-            "statusMessage": "Updating shared OKF documents"
+            "statusMessage": "Journaling work into the OKF worklog"
           }
         ]
       }

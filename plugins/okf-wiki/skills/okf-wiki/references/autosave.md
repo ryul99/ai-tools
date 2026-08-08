@@ -6,49 +6,9 @@ main-agent turns. Claude Code installs the declared base-plugin dependency;
 Codex users install both plugins explicitly and trust the hook through
 `/hooks`.
 
-## Opt in shared documents
-
-Outside the dedicated worklog directory, autosave never creates documents. It
-considers only existing concepts tagged `worklog-managed` and updates at most
-three concepts per turn.
-
-Use durable topic, project, decision, or runbook concepts rather than
-conversation-oriented files. Managed bodies may contain these default
-sections:
-
-```markdown
-# Current state
-
-# Decisions
-
-# Verification
-
-# Next steps
-
-# Recent changes
-```
-
-Override the allowed section names for one concept with an extension field:
-
-```yaml
-automation:
-  sections:
-    - Status
-    - Decisions
-    - Follow-up
-```
-
-Machine updates are refused for deprecated or human-reviewed concepts by
-default. A human-reviewed concept must explicitly opt in:
-
-```yaml
-automation:
-  allow_machine_updates: true
-```
-
 ## Journal work in the worklog directory
 
-Autosave also keeps an automatic work journal. When a turn contains meaningful
+Autosave keeps an automatic work journal. When a turn contains meaningful
 work, it appends a bullet entry under a per-day `## YYYY-MM-DD` heading at the
 end of a worklog concept inside a dedicated bundle-relative directory
 (`worklog/` by default); same-day entries share one heading, so the body reads
@@ -57,24 +17,23 @@ worklog reuses that concept's slug — the planner sees the full slug index and
 the most relevant worklog bodies — while new work creates a new concept via
 `okf new` with type `Worklog` and tag `autosave-worklog`.
 
-Worklog writes obey the same guarantees as section updates: deterministic
-writer, atomic writes, and post-write validation with rollback. Concepts are
-only ever created inside the worklog directory. Treat worklog concepts as
-machine-owned journals; move durable conclusions into curated concepts
-manually.
+Worklog writes use a deterministic writer, atomic writes, and post-write
+validation with rollback. Concepts are only ever created inside the worklog
+directory. Treat worklog concepts as machine-owned journals; move durable
+conclusions into curated concepts manually.
 
 ## Understand update behavior
 
 The hook reads the current turn and workspace state transiently, retrieves
-candidate concepts with `okf`, and invokes the host CLI with a JSON Schema.
+existing worklogs with `okf`, and invokes the host CLI with a JSON Schema.
 Claude Code uses a tool-free `claude -p` child; Codex uses an ephemeral
 `codex exec` child in an isolated directory with hooks and user config disabled
 and a read-only sandbox. The child uses the matching subscription login and
-returns a bounded section-update plan.
+returns a bounded journaling plan.
 
-The deterministic writer enforces candidate IDs, allowed headings, confidence,
-content hashes, and atomic writes. It validates bodies, links, and citations
-after applying a plan and restores originals if checks fail. Hook receipts are
+The deterministic writer enforces the slug pattern, confidence, content
+hashes, and atomic writes. It validates bodies, links, and citations after
+applying a plan and restores originals if checks fail. Hook receipts are
 content fingerprints in plugin data; they contain no session ID or transcript.
 
 ## Configure operation
@@ -83,13 +42,12 @@ content fingerprints in plugin data; they contain no session ID or transcript.
 - Set `OKF_AUTOSAVE_CLAUDE_MODEL` to override the Claude default `sonnet` model.
 - Set `OKF_AUTOSAVE_CODEX_MODEL` to override the current Codex default model.
 - Set `OKF_AUTOSAVE_CLI` to `claude` or `codex` to override host detection.
-- Set `OKF_AUTOSAVE_MIN_CONFIDENCE` to override the default `0.85` threshold.
-- Set `OKF_AUTOSAVE_MAX_CANDIDATES` to change the default candidate limit of 8.
 - Set `OKF_AUTOSAVE_WORKLOG_DIR` to change the worklog directory (default
   `worklog`), or to an empty string to disable journaling.
 - Set `OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE` to override the journaling
   threshold (default `0.6`).
+- System-triggered turns (task notifications, Monitor events, scheduled
+  wakeups, peer-agent messages) are skipped automatically in Claude Code.
 
-If no valid bundle is available, or neither an opted-in concept nor an enabled
-worklog directory exists, autosave performs no write. It never modifies
-`index.md` or `log.md`.
+If no valid bundle is available or the worklog directory is disabled, autosave
+performs no write. It never modifies `index.md` or `log.md`.
