@@ -30,6 +30,41 @@ class AutosaveBodyTests(unittest.TestCase):
             "# Current state\n\nReady.\n\n# Next steps\n\nShip it.\n",
         )
 
+    def test_merges_duplicate_sections_instead_of_failing(self) -> None:
+        body = (
+            "# Current state\n\nOld.\n\n"
+            "# Next steps\n\n- Newest plan.\n\n"
+            "# Next steps\n\n- Stale copy.\n\n"
+            "# Next steps\n\n- Older copy.\n\n"
+            "# Log\n\n## 2026-08-07\n\n- Entry.\n"
+        )
+        updated = MODULE.replace_section(body, "Next steps", "- Fresh plan.")
+        self.assertEqual(
+            updated,
+            "# Current state\n\nOld.\n\n"
+            "# Next steps\n\n- Fresh plan.\n\n"
+            "# Log\n\n## 2026-08-07\n\n- Entry.\n",
+        )
+
+    def test_ignores_deeper_headings_with_the_managed_title(self) -> None:
+        body = (
+            "# Next steps\n\n- Real section.\n\n"
+            "# Log\n\n### Next steps\n\n- Just a journal sub-heading.\n"
+        )
+        updated = MODULE.replace_section(body, "Next steps", "- Replaced.")
+        self.assertEqual(
+            updated,
+            "# Next steps\n\n- Replaced.\n\n"
+            "# Log\n\n### Next steps\n\n- Just a journal sub-heading.\n",
+        )
+
+    def test_demotes_heading_lines_to_bold_text(self) -> None:
+        text = "- Did work.\n# Next steps\n- Follow up.\n  ## Indented ##\nplain # not a heading"
+        self.assertEqual(
+            MODULE.demote_heading_lines(text),
+            "- Did work.\n**Next steps**\n- Follow up.\n  **Indented**\nplain # not a heading",
+        )
+
     def test_splits_frontmatter_without_reformatting_it(self) -> None:
         raw = b"---\ntype: Workstream\n---\n# Current state\n"
         prefix, body = MODULE.split_frontmatter(raw)
@@ -118,6 +153,10 @@ class WorklogTests(unittest.TestCase):
         updated = MODULE.append_worklog_entry("", "2026-08-07", "- One.\n- Two.")
         self.assertEqual(updated, "## 2026-08-07\n\n- One.\n- Two.\n")
 
+    def test_demotes_heading_lines_inside_entries(self) -> None:
+        updated = MODULE.append_worklog_entry("", "2026-08-07", "- One.\n# Next steps\n- Two.")
+        self.assertEqual(updated, "## 2026-08-07\n\n- One.\n**Next steps**\n- Two.\n")
+
     def test_default_worklog_directory(self) -> None:
         with unittest.mock.patch.dict(os.environ, {}, clear=False):
             os.environ.pop("OKF_AUTOSAVE_WORKLOG_DIR", None)
@@ -189,6 +228,33 @@ class WorklogTests(unittest.TestCase):
         self.assertIn("worklog", with_worklog["properties"])
         self.assertIn("worklog", with_worklog["required"])
         self.assertNotIn("operations", with_worklog["properties"])
+
+    def test_schema_worklog_is_nullable_via_anyof(self) -> None:
+        worklog = MODULE.update_schema([], True)["properties"]["worklog"]
+        self.assertNotIn("type", worklog)
+        variants = {json.dumps(item.get("type")) for item in worklog["anyOf"]}
+        self.assertEqual(variants, {'"object"', '"null"'})
+
+    def test_prompt_spells_out_the_noop_plan(self) -> None:
+        prompt = MODULE.planner_prompt(True, {"index": [], "details": []})
+        self.assertIn('{"material_change": false, "operations": [], "worklog": null}', prompt)
+        without_candidates = MODULE.planner_prompt(False, None)
+        self.assertIn('{"material_change": false}', without_candidates)
+        self.assertNotIn("operations", without_candidates)
+
+
+class GitContextTests(unittest.TestCase):
+    def test_skips_commands_that_time_out(self) -> None:
+        def fake_run(command, **kwargs):
+            if command[1] == "status":
+                raise subprocess.TimeoutExpired(command, kwargs["timeout"])
+            return subprocess.CompletedProcess(command, 0, "clean\n", "")
+
+        with unittest.mock.patch.object(MODULE.shutil, "which", return_value="/usr/bin/git"):
+            with unittest.mock.patch.object(MODULE, "run_process", side_effect=fake_run):
+                context = MODULE.git_context(Path("/tmp"))
+        self.assertNotIn("status", context)
+        self.assertEqual(context["branch"], "clean")
 
 
 class PlannerRuntimeTests(unittest.TestCase):

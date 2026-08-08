@@ -1,7 +1,7 @@
 {
   "name": "okf-wiki-autosave",
   "description": "Automatically maintain opted-in shared OKF documents and journal work into a dedicated worklog directory when Claude Code finishes a turn.",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "author": {
     "name": "ryul99"
   },

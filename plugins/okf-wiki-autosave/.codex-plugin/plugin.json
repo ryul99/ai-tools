@@ -1,6 +1,6 @@
 {
   "name": "okf-wiki-autosave",
-  "version": "0.4.1",
+  "version": "0.4.2",
   "description": "Maintains opted-in shared OKF documents and journals meaningful work after turns.",
   "author": {
     "name": "ryul99",

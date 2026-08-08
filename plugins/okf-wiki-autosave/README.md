@@ -34,7 +34,12 @@ directory hierarchy or an `OKF_ROOT` value.
 ## Shared document updates
 
 Section updates only consider existing concepts tagged `worklog-managed` and
-update at most three concepts per turn.
+update at most three concepts per turn. Planner-written content is sanitized
+before it lands in a document: Markdown heading lines inside section content
+or journal entries are demoted to bold text so they cannot collide with
+managed headings. If a document already contains duplicated managed headings
+(for example from earlier tool versions), the next update merges them back
+into a single section, keeping the first occurrence.
 
 ## Worklog journaling
 
