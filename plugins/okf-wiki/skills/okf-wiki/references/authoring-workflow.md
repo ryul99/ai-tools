@@ -36,9 +36,11 @@ Use the narrowest view that answers the question:
 okf show tables/orders --frontmatter-only --format json
 okf show tables/orders --body-only
 okf meta get tables/orders generated.by --format json
+okf tag list --format json
+okf tag list tables --counts --format json
 ```
 
-Use `list` and `search` first when the exact concept is unknown. Do not guess a concept ID when discovery can resolve it.
+Use `list` and `search` first when the exact concept is unknown. Use `tag list` to discover the bundle's tag vocabulary or inspect tag usage within a path. Do not guess a concept ID or tag when discovery can resolve it.
 
 ## Change frontmatter narrowly
 

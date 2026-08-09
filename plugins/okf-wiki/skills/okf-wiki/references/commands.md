@@ -34,6 +34,14 @@ The shared list and search filters are:
 --due-before YYYY-MM-DD
 ```
 
+List distinct tags across the bundle or within a concept or directory:
+
+```text
+okf tag list [path] [--counts]
+```
+
+Text output lists tags in lexical order, one per line. `--counts` reports the number of concepts using each tag; repeated instances of the same tag in one concept count once. JSON output is an array of tag strings by default, or objects with `tag` and `count` when `--counts` is supplied. Empty results succeed with no text or an empty JSON array.
+
 ## Maintain metadata
 
 ```text
