@@ -52,12 +52,34 @@ to bold text so they cannot collide with the per-day date headings.
   validated with `okf validate`, link checks, and citation checks; failed
   checks roll the write back.
 
+## Rollover
+
+A worklog that grows past its byte budget sheds its oldest days into sealed
+partition concepts named `<slug>-1`, `<slug>-2`, and so on, so the concept the
+hook appends to stays small.
+
+- Days are the atomic unit. A single day is never divided, and the worklog
+  always keeps at least its most recent day, so a day larger than the budget
+  seals on its own.
+- Cuts are made by position in the body, never by parsed date, so a day
+  heading that arrives out of order cannot reorder or merge earlier history.
+- A partition records the span it covers in its title, carries the topic tags
+  of the worklog it came from, and is never written again.
+- Only the worklog the hook appends to carries `autosave-worklog-head`, and
+  the planner index is built from that tag, so a sealed partition is never
+  offered as a slug to append to. Both heads and partitions keep
+  `autosave-worklog`.
+- Sealing and the append are one transaction: a failed check removes the new
+  partitions and restores the original worklog.
+
 Configuration:
 
 - `OKF_AUTOSAVE_WORKLOG_DIR` sets the bundle-relative worklog directory
   (default `worklog`). Set it to an empty string to disable journaling.
 - `OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE` overrides the journaling confidence
   threshold (default `0.6`).
+- `OKF_AUTOSAVE_WORKLOG_MAX_BYTES` sets the rollover budget in bytes (default
+  `16000`). Set it to an empty string to disable rollover.
 
 ## Autonomous turns
 

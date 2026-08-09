@@ -20,11 +20,14 @@ MAX_EVIDENCE_CHARS = 20_000
 SYSTEM_ORIGIN_KINDS = {"task-notification", "peer", "coordinator"}
 DEFAULT_WORKLOG_DIR = "worklog"
 WORKLOG_TAG = "autosave-worklog"
+WORKLOG_HEAD_TAG = "autosave-worklog-head"
 WORKLOG_TYPE = "Worklog"
 WORKLOG_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
+WORKLOG_PARTITION_PATTERN = re.compile(r"-(\d+)$")
 MAX_WORKLOG_ENTRY_CHARS = 4_000
 MAX_WORKLOG_DETAILS = 5
 MAX_WORKLOG_INDEX = 500
+DEFAULT_WORKLOG_MAX_BYTES = 16_000
 
 
 class AutosaveError(RuntimeError):
@@ -576,7 +579,7 @@ def rank_worklog_records(
 def load_worklog_context(root: Path, worklog_dir: str, evidence: str) -> dict[str, Any]:
     context: dict[str, Any] = {"index": [], "details": []}
     try:
-        records = run_okf(root, "list", "--tag", WORKLOG_TAG)
+        records = run_okf(root, "list", "--tag", WORKLOG_HEAD_TAG)
     except AutosaveError:
         return context
     if not isinstance(records, list):
@@ -639,6 +642,129 @@ def append_worklog_entry(body: str, stamp: str, entry: str) -> str:
     return f"{trimmed}\n\n{section}" if trimmed else section
 
 
+def worklog_budget() -> int | None:
+    configured = os.environ.get("OKF_AUTOSAVE_WORKLOG_MAX_BYTES")
+    if configured is None:
+        return DEFAULT_WORKLOG_MAX_BYTES
+    configured = configured.strip()
+    if not configured:
+        return None
+    try:
+        value = int(configured)
+    except ValueError as exc:
+        raise AutosaveError("OKF_AUTOSAVE_WORKLOG_MAX_BYTES must be an integer") from exc
+    if value <= 0:
+        raise AutosaveError("OKF_AUTOSAVE_WORKLOG_MAX_BYTES must be positive")
+    return value
+
+
+def worklog_day_blocks(body: str) -> tuple[str, list[tuple[str, str]]]:
+    """Split a worklog body into its leading text and its day sections.
+
+    Sections are cut by position rather than by parsed date, so a day heading
+    that arrives out of order cannot reorder or merge earlier history.
+    """
+    days = [match for match in heading_matches(body) if match[2] == 2]
+    if not days:
+        return body, []
+    blocks: list[tuple[str, str]] = []
+    for index, match in enumerate(days):
+        end = days[index + 1][0] if index + 1 < len(days) else len(body)
+        blocks.append((match[3], body[match[0] : end]))
+    return body[: days[0][0]], blocks
+
+
+def split_worklog_body(body: str, budget: int) -> tuple[list[list[tuple[str, str]]], str]:
+    """Return the day groups to seal and the body the active worklog keeps.
+
+    A day is never divided, so a single day larger than the budget seals alone
+    and the active worklog always retains at least the most recent day.
+    """
+    preamble, blocks = worklog_day_blocks(body)
+
+    def measure(items: list[tuple[str, str]]) -> int:
+        return sum(len(text) for _, text in items)
+
+    if len(blocks) < 2 or len(preamble) + measure(blocks) <= budget:
+        return [], body
+    sealed: list[list[tuple[str, str]]] = []
+    while len(blocks) > 1 and len(preamble) + measure(blocks) > budget:
+        take = 1
+        while take < len(blocks) - 1 and measure(blocks[: take + 1]) <= budget:
+            take += 1
+        sealed.append(blocks[:take])
+        blocks = blocks[take:]
+    return sealed, preamble + "".join(text for _, text in blocks)
+
+
+def next_partition_index(root: Path, worklog_dir: str, slug: str) -> int:
+    directory = safe_concept_path(root, f"{worklog_dir}/{slug}").parent
+    highest = 0
+    for path in directory.glob(f"{slug}-*.md"):
+        match = WORKLOG_PARTITION_PATTERN.fullmatch(path.stem[len(slug) :])
+        if match:
+            highest = max(highest, int(match.group(1)))
+    return highest + 1
+
+
+def worklog_frontmatter(root: Path, concept_id: str) -> dict[str, Any]:
+    shown = run_okf(root, "show", concept_id, "--frontmatter-only")
+    if not isinstance(shown, dict):
+        return {}
+    nested = shown.get("frontmatter")
+    return nested if isinstance(nested, dict) else shown
+
+
+def worklog_partition_tags(frontmatter: dict[str, Any]) -> list[str]:
+    """Carry the head's tags onto a sealed partition, minus the head marker.
+
+    Partitions stay discoverable by topic and keep the machine-owned worklog
+    tag, but never advertise themselves as an append target.
+    """
+    values = frontmatter.get("tags")
+    tags = [
+        tag
+        for tag in (values if isinstance(values, list) else [])
+        if isinstance(tag, str) and tag.strip() and tag != WORKLOG_HEAD_TAG
+    ]
+    if WORKLOG_TAG not in tags:
+        tags.append(WORKLOG_TAG)
+    return tags
+
+
+def seal_worklog_partition(
+    root: Path,
+    concept_id: str,
+    title: str,
+    tags: list[str],
+    body: str,
+) -> Path:
+    path = safe_concept_path(root, concept_id)
+    if path.exists():
+        raise AutosaveError(f"worklog partition already exists: {concept_id}")
+    arguments = [
+        "new",
+        concept_id,
+        "--type",
+        WORKLOG_TYPE,
+        "--title",
+        title,
+        "--description",
+        title,
+        "--status",
+        "stable",
+        "--generated-by",
+        "okf-wiki-autosave",
+    ]
+    for tag in tags:
+        arguments.extend(["--tag", tag])
+    run_okf(root, *arguments)
+    created = path.read_bytes()
+    prefix, _ = split_frontmatter(created)
+    atomic_write(path, prefix + body.encode("utf-8"), file_hash(created))
+    return path
+
+
 def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | None:
     if plan.get("material_change") is not True:
         return None
@@ -675,6 +801,8 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
             title.strip(),
             "--tag",
             WORKLOG_TAG,
+            "--tag",
+            WORKLOG_HEAD_TAG,
             "--generated-by",
             "okf-wiki-autosave",
         )
@@ -685,16 +813,48 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
     except UnicodeDecodeError as exc:
         raise AutosaveError(f"worklog body is not UTF-8: {concept_id}") from exc
     stamp = time.strftime("%Y-%m-%d")
-    proposed = prefix + append_worklog_entry(body, stamp, entry).encode("utf-8")
+    updated = append_worklog_entry(body, stamp, entry)
+    budget = worklog_budget()
+    groups: list[list[tuple[str, str]]] = []
+    if budget is not None:
+        groups, updated = split_worklog_body(updated, budget)
+    proposed = prefix + updated.encode("utf-8")
+    partitions: list[tuple[str, Path]] = []
+    wrote_active = False
     try:
+        if groups:
+            frontmatter = worklog_frontmatter(root, concept_id)
+            base_title = str(frontmatter.get("title") or title).strip()
+            tags = worklog_partition_tags(frontmatter)
+            index = next_partition_index(root, worklog_dir, slug)
+            for group in groups:
+                partition_id = f"{worklog_dir}/{slug}-{index}"
+                span = f"{group[0][0]} ~ {group[-1][0]}"
+                partitions.append(
+                    (
+                        partition_id,
+                        seal_worklog_partition(
+                            root,
+                            partition_id,
+                            f"{base_title} ({span})",
+                            tags,
+                            "".join(text for _, text in group),
+                        ),
+                    )
+                )
+                index += 1
         atomic_write(path, proposed, file_hash(original))
-        run_okf(root, "validate", concept_id)
-        run_okf(root, "links", "check", concept_id)
-        run_okf(root, "citations", "check", concept_id)
+        wrote_active = True
+        for checked in [concept_id, *(partition_id for partition_id, _ in partitions)]:
+            run_okf(root, "validate", checked)
+            run_okf(root, "links", "check", checked)
+            run_okf(root, "citations", "check", checked)
     except Exception:
+        for _, partition_path in partitions:
+            partition_path.unlink(missing_ok=True)
         if created:
             path.unlink(missing_ok=True)
-        else:
+        elif wrote_active:
             atomic_write(path, original, file_hash(proposed))
         raise
     return concept_id

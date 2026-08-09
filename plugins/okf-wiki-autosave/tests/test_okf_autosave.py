@@ -343,5 +343,111 @@ class PlannerRuntimeTests(unittest.TestCase):
         self.assertEqual(command[command.index("--model") + 1], "claude-test-model")
 
 
+class WorklogRolloverTests(unittest.TestCase):
+    def build(self, days: dict[str, int]) -> str:
+        return "".join(f"## {day}\n\n- {'x' * size}\n\n" for day, size in days.items())
+
+    def day_names(self, body: str) -> list[str]:
+        return [day for day, _ in MODULE.worklog_day_blocks(body)[1]]
+
+    def test_keeps_a_body_that_fits_the_budget(self) -> None:
+        body = self.build({"2026-01-01": 100, "2026-01-02": 100})
+        self.assertEqual(MODULE.split_worklog_body(body, 16_000), ([], body))
+
+    def test_seals_oldest_days_until_the_body_fits(self) -> None:
+        body = self.build({f"2026-01-{day:02d}": 400 for day in range(1, 11)})
+        sealed, active = MODULE.split_worklog_body(body, 1_000)
+        self.assertTrue(sealed)
+        self.assertLessEqual(len(active), 1_000)
+        preserved = [day for group in sealed for day, _ in group] + self.day_names(active)
+        self.assertEqual(preserved, [f"2026-01-{day:02d}" for day in range(1, 11)])
+
+    def test_never_divides_a_single_day(self) -> None:
+        body = self.build({"2026-01-01": 50, "2026-01-02": 5_000, "2026-01-03": 50})
+        sealed, active = MODULE.split_worklog_body(body, 1_000)
+        oversized = [group for group in sealed if any(len(text) > 1_000 for _, text in group)]
+        self.assertEqual(len(oversized), 1)
+        self.assertEqual([day for day, _ in oversized[0]], ["2026-01-02"])
+        self.assertEqual(self.day_names(active), ["2026-01-03"])
+
+    def test_always_keeps_the_most_recent_day_active(self) -> None:
+        body = self.build({"2026-01-01": 4_000, "2026-01-02": 4_000})
+        sealed, active = MODULE.split_worklog_body(body, 100)
+        self.assertEqual(len(sealed), 1)
+        self.assertEqual(self.day_names(active), ["2026-01-02"])
+
+    def test_a_body_without_day_headings_is_untouched(self) -> None:
+        body = "Preamble with no day heading.\n"
+        self.assertEqual(MODULE.split_worklog_body(body, 10), ([], body))
+
+    def test_preamble_stays_with_the_active_worklog(self) -> None:
+        body = "Intro line.\n\n" + self.build({"2026-01-01": 900, "2026-01-02": 900})
+        sealed, active = MODULE.split_worklog_body(body, 1_000)
+        self.assertTrue(sealed)
+        self.assertTrue(active.startswith("Intro line."))
+
+    def test_cuts_by_position_so_out_of_order_days_keep_their_order(self) -> None:
+        body = self.build({"2026-03-01": 900, "2026-01-05": 900, "2026-03-02": 900})
+        sealed, active = MODULE.split_worklog_body(body, 1_000)
+        preserved = [day for group in sealed for day, _ in group] + self.day_names(active)
+        self.assertEqual(preserved, ["2026-03-01", "2026-01-05", "2026-03-02"])
+
+    def test_rollover_is_idempotent_once_the_body_fits(self) -> None:
+        body = self.build({f"2026-01-{day:02d}": 400 for day in range(1, 11)})
+        _, active = MODULE.split_worklog_body(body, 1_000)
+        self.assertEqual(MODULE.split_worklog_body(active, 1_000), ([], active))
+
+    def test_budget_defaults_and_can_be_disabled(self) -> None:
+        with unittest.mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("OKF_AUTOSAVE_WORKLOG_MAX_BYTES", None)
+            self.assertEqual(MODULE.worklog_budget(), MODULE.DEFAULT_WORKLOG_MAX_BYTES)
+        with unittest.mock.patch.dict(os.environ, {"OKF_AUTOSAVE_WORKLOG_MAX_BYTES": ""}):
+            self.assertIsNone(MODULE.worklog_budget())
+        with unittest.mock.patch.dict(os.environ, {"OKF_AUTOSAVE_WORKLOG_MAX_BYTES": "nope"}):
+            with self.assertRaises(MODULE.AutosaveError):
+                MODULE.worklog_budget()
+
+    def test_partition_index_continues_after_existing_partitions(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "worklog").mkdir()
+            for name in ("columbus.md", "columbus-1.md", "columbus-7.md", "columbus-demo.md"):
+                (root / "worklog" / name).write_text("---\ntype: Worklog\n---\n")
+            self.assertEqual(MODULE.next_partition_index(root, "worklog", "columbus"), 8)
+
+    def test_partition_keeps_topic_tags_but_drops_the_head_marker(self) -> None:
+        tags = MODULE.worklog_partition_tags(
+            {"tags": ["columbus", MODULE.WORKLOG_TAG, MODULE.WORKLOG_HEAD_TAG]}
+        )
+        self.assertEqual(tags, ["columbus", MODULE.WORKLOG_TAG])
+
+    def test_partition_tags_add_the_worklog_tag_when_missing(self) -> None:
+        self.assertEqual(
+            MODULE.worklog_partition_tags({"tags": ["columbus"]}),
+            ["columbus", MODULE.WORKLOG_TAG],
+        )
+
+    def test_the_planner_index_is_built_from_head_tagged_worklogs(self) -> None:
+        listed: list[tuple[str, ...]] = []
+
+        def fake_run_okf(root, *arguments):
+            listed.append(arguments)
+            if arguments[0] == "list":
+                return [
+                    {
+                        "id": "worklog/columbus",
+                        "title": "Columbus",
+                        "tags": [MODULE.WORKLOG_TAG, MODULE.WORKLOG_HEAD_TAG],
+                    }
+                ]
+            return {"frontmatter": {"title": "Shown"}, "body": "Body."}
+
+        with unittest.mock.patch.object(MODULE, "run_okf", side_effect=fake_run_okf):
+            with unittest.mock.patch.object(MODULE, "worklog_modified_at", return_value=0.0):
+                context = MODULE.load_worklog_context(Path("/tmp/wiki"), "worklog", "columbus")
+        self.assertEqual(listed[0], ("list", "--tag", MODULE.WORKLOG_HEAD_TAG))
+        self.assertEqual([item["slug"] for item in context["index"]], ["columbus"])
+
+
 if __name__ == "__main__":
     unittest.main()

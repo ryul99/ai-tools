@@ -22,6 +22,19 @@ validation with rollback. Concepts are only ever created inside the worklog
 directory. Treat worklog concepts as machine-owned journals; move durable
 conclusions into curated concepts manually.
 
+## Read a partitioned worklog
+
+A worklog that outgrows its byte budget sheds its oldest days into sealed
+partitions named `<slug>-1`, `<slug>-2`, and so on, so the concept the hook
+appends to stays small. A day is never divided across partitions, and each
+partition names the span it covers in its title.
+
+Both the active worklog and its partitions carry `autosave-worklog` and the
+topic tags of the stream, so `okf list --tag <topic>` and `okf search` reach
+every part. Only the active worklog carries `autosave-worklog-head`; filter on
+that tag to find the concept currently being appended to. Partitions are
+immutable — read them, but do not append to them.
+
 ## Understand update behavior
 
 The hook reads the current turn and workspace state transiently, retrieves
@@ -46,6 +59,8 @@ content fingerprints in plugin data; they contain no session ID or transcript.
   `worklog`), or to an empty string to disable journaling.
 - Set `OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE` to override the journaling
   threshold (default `0.6`).
+- Set `OKF_AUTOSAVE_WORKLOG_MAX_BYTES` to change the rollover budget in bytes
+  (default `16000`), or to an empty string to disable rollover.
 - System-triggered turns (task notifications, Monitor events, scheduled
   wakeups, peer-agent messages) are skipped automatically in Claude Code.
 
