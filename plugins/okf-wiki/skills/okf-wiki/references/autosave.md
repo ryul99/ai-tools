@@ -17,6 +17,12 @@ worklog reuses that concept's slug — the planner sees the full slug index and
 the most relevant worklog bodies — while new work creates a new concept via
 `okf new` with type `Worklog` and tag `autosave-worklog`.
 
+An entry is planned as a scope tag, a summary, and a list of refs, then
+rendered into one bullet — `` - `[scope]` summary (ref · ref) `` — so each
+line identifies its own subject and outcome without the surrounding entries.
+Read the scope tags to scan a worklog; the refs point at the pull requests,
+issues, commits, and files the entry came from.
+
 Worklog writes use a deterministic writer, atomic writes, and post-write
 validation with rollback. Concepts are only ever created inside the worklog
 directory. Treat worklog concepts as machine-owned journals; move durable

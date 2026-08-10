@@ -1,7 +1,7 @@
 {
   "name": "okf-wiki",
   "description": "Inspect, author, validate, and safely refactor file-based Open Knowledge Format wikis with the okf CLI.",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "author": {
     "name": "ryul99"
   },

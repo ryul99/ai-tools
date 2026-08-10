@@ -42,6 +42,26 @@ tagged `autosave-worklog`. Planner-written content is sanitized before it
 lands in a document: Markdown heading lines inside journal entries are demoted
 to bold text so they cannot collide with the per-day date headings.
 
+Each entry is planned as three fields and rendered by the hook into one
+bullet, so a line stays legible without its neighbours:
+
+```md
+- `[suggestions GEPA v4]` cand9를 최종 채택. (PR #1651 · SEARCH-4955)
+```
+
+- `scope` is the leading tag naming the project, component, experiment, or
+  document the work was about. It is wrapped in inline code so a bracketed tag
+  is never parsed as a Markdown link.
+- `summary` states what was done, why, and the real outcome, and must be
+  readable on its own — the planner is told to name subjects instead of using
+  pronouns and to expand internal shorthand on first use.
+- `refs` are verifiable anchors taken from the evidence (pull requests, issue
+  keys, commits, branches, file paths) and trail the summary in parentheses.
+  The trailer is omitted when the turn produced none.
+
+Fields are flattened to a single line, stripped of backticks, and truncated
+before rendering, so no entry can break out of its bullet.
+
 - Work that continues an existing worklog is appended to the same concept; new
   work creates a new concept with a new slug. The full slug index plus the
   most relevant worklog bodies are supplied to the planner so slugs are reused

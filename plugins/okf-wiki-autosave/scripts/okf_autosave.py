@@ -25,6 +25,10 @@ WORKLOG_TYPE = "Worklog"
 WORKLOG_SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9-]{0,63}$")
 WORKLOG_PARTITION_PATTERN = re.compile(r"-(\d+)$")
 MAX_WORKLOG_ENTRY_CHARS = 4_000
+MAX_WORKLOG_SCOPE_CHARS = 100
+MAX_WORKLOG_SUMMARY_CHARS = 1_200
+MAX_WORKLOG_REFS = 8
+MAX_WORKLOG_REF_CHARS = 100
 MAX_WORKLOG_DETAILS = 5
 MAX_WORKLOG_INDEX = 500
 DEFAULT_WORKLOG_MAX_BYTES = 16_000
@@ -269,7 +273,16 @@ def update_schema() -> dict[str, Any]:
                             "slug": {"type": "string", "pattern": "^[a-z0-9][a-z0-9-]{0,63}$"},
                             "title": {"type": "string"},
                             "confidence": {"type": "number", "minimum": 0, "maximum": 1},
-                            "entry": {"type": "string"},
+                            "entry": {
+                                "type": "object",
+                                "additionalProperties": False,
+                                "properties": {
+                                    "scope": {"type": "string"},
+                                    "summary": {"type": "string"},
+                                    "refs": {"type": "array", "items": {"type": "string"}},
+                                },
+                                "required": ["scope", "summary", "refs"],
+                            },
                         },
                         "required": ["slug", "title", "confidence", "entry"],
                     },
@@ -308,7 +321,13 @@ The "worklog" field appends a journal entry to a dedicated worklog directory:
 - worklogs.index lists every existing worklog slug with its title; worklogs.details holds the worklogs most relevant to the evidence, with a body excerpt.
 - When the turn continues the task of any worklog in worklogs.index, reuse that slug — prefer reusing an existing slug over creating a new one. Only when nothing matches, choose a new slug naming the task: ASCII lowercase kebab-case (letters, digits, hyphens; at most 64 characters).
 - "title" is a short human-readable task title, used only when the worklog is first created.
-- "entry" is a concise Markdown summary of this turn only: what was done, key decisions, and real outcomes. It is stored as bullet items under a per-day date heading, so write one short summary line or a few "- " bullets without Markdown headings. Do not repeat facts already visible in that worklog's body_tail.
+
+"entry" records this turn only. Its three fields are rendered into one dated bullet, so write plain text in each: no Markdown headings, bullet markers, or line breaks.
+- "scope" is a short tag naming what the work was about — the project, component, experiment, document, or incident. It is what a reader scans first, so make it specific enough to tell this entry apart from neighbouring ones. Never write "the same as above" or point at another entry.
+- "summary" states what was done, why it was done, and the real outcome, in one to four sentences. Every entry must be readable on its own: name the subject instead of writing "it", "this", or "the previous run", and say what an internal shorthand (candidate name, version label, scenario ID, run number) refers to the first time it appears.
+- "refs" lists verifiable anchors that already appear in the evidence — pull request numbers, issue keys, commit hashes, branch names, file paths. Keep it to the few that best locate the work rather than every file the turn touched; prefer a pull request or issue key over a file path. Use an empty array when the evidence offers none, and never invent one.
+- Write "scope" and "summary" in the language the worklog body already uses; for a new worklog, follow the language of the evidence.
+- Do not journal work that body_tail already records as a new entry. Naming the subject and its background again is not a repeat — it is what makes an entry stand alone.
 """
 
 
@@ -622,6 +641,37 @@ def load_worklog_context(root: Path, worklog_dir: str, evidence: str) -> dict[st
     return context
 
 
+def flatten_field(value: Any, limit: int) -> str:
+    """Collapse a planner-written field into a single bounded plain-text line.
+
+    Newlines and backticks are removed rather than escaped so a field can never
+    break out of the bullet it is rendered into.
+    """
+    if not isinstance(value, str):
+        return ""
+    return re.sub(r"\s+", " ", value.replace("`", "")).strip()[:limit]
+
+
+def render_worklog_entry(entry: dict[str, Any]) -> str:
+    """Render a planner entry as one self-contained `[scope]`-tagged bullet.
+
+    The scope tag is wrapped in inline code so a bracketed tag is never read as
+    a Markdown link, and refs trail the summary in parentheses.
+    """
+    scope = flatten_field(entry.get("scope"), MAX_WORKLOG_SCOPE_CHARS)
+    summary = flatten_field(entry.get("summary"), MAX_WORKLOG_SUMMARY_CHARS)
+    if not scope or not summary:
+        return ""
+    values = entry.get("refs")
+    refs = [
+        flattened
+        for value in (values if isinstance(values, list) else [])
+        if (flattened := flatten_field(value, MAX_WORKLOG_REF_CHARS))
+    ][:MAX_WORKLOG_REFS]
+    trailer = f" ({' · '.join(refs)})" if refs else ""
+    return f"- `[{scope}]` {summary}{trailer}"
+
+
 def worklog_bullets(entry: str) -> str:
     lines = entry.split("\n")
     if lines[0].lstrip().startswith(("- ", "* ")):
@@ -779,7 +829,10 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
         raise AutosaveError(f"invalid worklog slug: {slug!r}")
     if not isinstance(title, str) or not title.strip():
         raise AutosaveError("worklog title must be a non-empty string")
-    if not isinstance(entry, str) or not entry.strip():
+    if not isinstance(entry, dict):
+        return None
+    rendered = render_worklog_entry(entry)
+    if not rendered:
         return None
     threshold = confidence_threshold("OKF_AUTOSAVE_WORKLOG_MIN_CONFIDENCE", "0.6")
     if not isinstance(confidence, (int, float)) or confidence < threshold:
@@ -813,7 +866,7 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
     except UnicodeDecodeError as exc:
         raise AutosaveError(f"worklog body is not UTF-8: {concept_id}") from exc
     stamp = time.strftime("%Y-%m-%d")
-    updated = append_worklog_entry(body, stamp, entry)
+    updated = append_worklog_entry(body, stamp, rendered)
     budget = worklog_budget()
     groups: list[list[tuple[str, str]]] = []
     if budget is not None:

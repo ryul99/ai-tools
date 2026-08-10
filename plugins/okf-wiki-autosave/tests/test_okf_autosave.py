@@ -185,6 +185,14 @@ class WorklogTests(unittest.TestCase):
         self.assertEqual(schema["required"], ["material_change", "worklog"])
         self.assertNotIn("operations", schema["properties"])
 
+    def test_schema_entry_is_a_structured_object(self) -> None:
+        worklog = MODULE.update_schema()["properties"]["worklog"]
+        entry = next(item for item in worklog["anyOf"] if item.get("type") == "object")
+        entry = entry["properties"]["entry"]
+        self.assertEqual(entry["type"], "object")
+        self.assertEqual(entry["required"], ["scope", "summary", "refs"])
+        self.assertEqual(entry["properties"]["refs"]["items"]["type"], "string")
+
     def test_schema_worklog_is_nullable_via_anyof(self) -> None:
         worklog = MODULE.update_schema()["properties"]["worklog"]
         self.assertNotIn("type", worklog)
@@ -195,6 +203,76 @@ class WorklogTests(unittest.TestCase):
         prompt = MODULE.planner_prompt()
         self.assertIn('{"material_change": false, "worklog": null}', prompt)
         self.assertNotIn("operations", prompt)
+
+    def test_prompt_asks_for_self_contained_entry_fields(self) -> None:
+        prompt = MODULE.planner_prompt()
+        for field in ('"scope"', '"summary"', '"refs"'):
+            self.assertIn(field, prompt)
+        self.assertIn("readable on its own", prompt)
+
+
+class WorklogEntryRenderTests(unittest.TestCase):
+    def test_renders_a_scope_tag_summary_and_refs(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {
+                "scope": "suggestions GEPA v4",
+                "summary": "cand9를 최종 채택했다.",
+                "refs": ["PR #1651", "SEARCH-4955"],
+            }
+        )
+        self.assertEqual(
+            rendered,
+            "- `[suggestions GEPA v4]` cand9를 최종 채택했다. (PR #1651 · SEARCH-4955)",
+        )
+
+    def test_omits_the_trailer_when_there_are_no_refs(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {"scope": "autosave hook", "summary": "Reworked the entry schema.", "refs": []}
+        )
+        self.assertEqual(rendered, "- `[autosave hook]` Reworked the entry schema.")
+
+    def test_collapses_newlines_and_strips_backticks(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {
+                "scope": "okf `autosave`",
+                "summary": "First line.\n\n- Second line.",
+                "refs": ["`main`"],
+            }
+        )
+        self.assertEqual(rendered, "- `[okf autosave]` First line. - Second line. (main)")
+
+    def test_drops_refs_that_are_not_strings_and_caps_the_list(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {
+                "scope": "scope",
+                "summary": "Summary.",
+                "refs": [None, "  ", *[f"PR #{index}" for index in range(MODULE.MAX_WORKLOG_REFS + 3)]],
+            }
+        )
+        self.assertEqual(rendered.count(" · "), MODULE.MAX_WORKLOG_REFS - 1)
+        self.assertIn("(PR #0 · ", rendered)
+
+    def test_truncates_oversized_fields(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {"scope": "s" * 500, "summary": "m" * 5_000, "refs": ["r" * 500]}
+        )
+        self.assertIn("`[" + "s" * MODULE.MAX_WORKLOG_SCOPE_CHARS + "]`", rendered)
+        self.assertIn("m" * MODULE.MAX_WORKLOG_SUMMARY_CHARS, rendered)
+        self.assertIn("(" + "r" * MODULE.MAX_WORKLOG_REF_CHARS + ")", rendered)
+
+    def test_rejects_an_entry_missing_a_scope_or_summary(self) -> None:
+        self.assertEqual(MODULE.render_worklog_entry({"summary": "Only a summary."}), "")
+        self.assertEqual(MODULE.render_worklog_entry({"scope": "Only a scope."}), "")
+        self.assertEqual(MODULE.render_worklog_entry({"scope": " ", "summary": " "}), "")
+
+    def test_a_rendered_entry_appends_as_a_single_bullet(self) -> None:
+        rendered = MODULE.render_worklog_entry(
+            {"scope": "autosave hook", "summary": "Reworked the schema.", "refs": ["a1b2c3d"]}
+        )
+        self.assertEqual(
+            MODULE.append_worklog_entry("", "2026-08-10", rendered),
+            "## 2026-08-10\n\n- `[autosave hook]` Reworked the schema. (a1b2c3d)\n",
+        )
 
 
 def user_record(text: str, origin_kind: str | None, prompt_source: str | None, **extra) -> str:
