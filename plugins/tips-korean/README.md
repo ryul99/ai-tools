@@ -21,11 +21,7 @@ claude plugin install tips-korean@ryul99-ai-tools
 
 ## Included skills
 
-- `korean-writing` helps produce Korean prose with complete sentences,
-  explicit grammatical relationships, precise vocabulary, and limited use of
-  ambiguous figurative expressions.
-- The guidance does not apply to quotations or text that belongs to code,
-  such as identifiers, comments, commit messages, and log strings.
+- `korean-writing`: Guidelines for writing fluent, natural Korean responses while preserving the intended meaning.
 
 ## Acknowledgement
 

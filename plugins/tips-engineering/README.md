@@ -19,5 +19,4 @@ claude plugin install tips-engineering@ryul99-ai-tools
 
 ## Included skills
 
-- `github-searching` helps investigate GitHub pull requests and issues using
-  their current status, closure context, recent activity, and related items.
+- `github-searching`: Tips for effectively searching GitHub issues and pull requests.
