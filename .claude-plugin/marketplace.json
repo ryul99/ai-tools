@@ -26,6 +26,11 @@
       "name": "okf-wiki-autosave",
       "source": "./plugins/okf-wiki-autosave",
       "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when an agent finishes a turn"
+    },
+    {
+      "name": "tips-korean",
+      "source": "./plugins/tips-korean",
+      "description": "A growing collection of lazily loaded tips for Korean users, the Korean language, and Korea-related contexts"
     }
   ]
 }

@@ -1,0 +1,12 @@
+{
+  "name": "tips-korean",
+  "description": "A growing collection of lazily loaded tips for Korean users, the Korean language, and Korea-related contexts.",
+  "version": "0.1.0",
+  "author": {
+    "name": "ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["tips", "korean", "korea", "language", "localization", "prompt-engineering"],
+  "skills": "./skills/"
+}

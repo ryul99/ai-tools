@@ -10,6 +10,7 @@ A small collection of plugins for Codex and Claude Code.
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
 | `okf-wiki-autosave` | Yes | Yes | Optionally maintains shared OKF work documents after agent turns. |
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
+| `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
 
 ## Installation
 
@@ -21,6 +22,7 @@ codex plugin add council@ryul99-ai-tools
 codex plugin add okf-wiki@ryul99-ai-tools
 codex plugin add okf-wiki-autosave@ryul99-ai-tools
 codex plugin add english-lecturer@ryul99-ai-tools
+codex plugin add tips-korean@ryul99-ai-tools
 ```
 
 Codex does not infer the autosave plugin's Claude-specific dependency metadata,
@@ -35,6 +37,7 @@ claude plugin install council@ryul99-ai-tools
 claude plugin install okf-wiki@ryul99-ai-tools
 claude plugin install okf-wiki-autosave@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
+claude plugin install tips-korean@ryul99-ai-tools
 ```
 
 Install only the plugins you need. `okf-wiki` never installs a hook. Install
@@ -49,6 +52,7 @@ Ask Codex or Claude Code to use an installed skill, for example:
 ```text
 Use the council to evaluate this proposal.
 Find related concepts in my OKF wiki.
+Write this explanation in clear Korean.
 ```
 
 The `okf-wiki` plugin expects the `okf` CLI to be installed. Run it inside a wiki, provide the wiki root in your request, or set it once for your shell:
