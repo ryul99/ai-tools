@@ -1,9 +1,10 @@
 {
   "name": "council",
-  "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
   "version": "1.0.0",
+  "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response",
   "author": {
-    "name": "ryul99"
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
   },
   "homepage": "https://github.com/ryul99/ai-tools",
   "repository": "https://github.com/ryul99/ai-tools",

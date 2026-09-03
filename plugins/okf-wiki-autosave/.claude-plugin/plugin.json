@@ -1,9 +1,10 @@
 {
   "name": "okf-wiki-autosave",
-  "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when Claude Code finishes a turn.",
   "version": "0.7.0",
+  "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when Claude Code finishes a turn.",
   "author": {
-    "name": "ryul99"
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
   },
   "homepage": "https://github.com/ryul99/ai-tools",
   "repository": "https://github.com/ryul99/ai-tools",
