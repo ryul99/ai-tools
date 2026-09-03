@@ -31,6 +31,11 @@
       "name": "tips-korean",
       "source": "./plugins/tips-korean",
       "description": "A growing collection of lazily loaded tips for Korean users, the Korean language, and Korea-related contexts"
+    },
+    {
+      "name": "tips-engineering",
+      "source": "./plugins/tips-engineering",
+      "description": "A growing collection of lazily loaded tips for software engineering workflows"
     }
   ]
 }

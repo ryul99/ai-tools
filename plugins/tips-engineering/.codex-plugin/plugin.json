@@ -1,0 +1,25 @@
+{
+  "name": "tips-engineering",
+  "version": "0.1.0",
+  "description": "A growing collection of lazily loaded tips for software engineering workflows.",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["tips", "engineering", "github", "pull-requests", "issues"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Tips: Engineering",
+    "shortDescription": "Load useful tips for engineering workflows.",
+    "longDescription": "Provides an extensible collection of lazily loaded skills for software engineering research and workflows.",
+    "developerName": "ryul99",
+    "category": "Productivity",
+    "capabilities": ["Interactive"],
+    "websiteURL": "https://github.com/ryul99/ai-tools",
+    "defaultPrompt": [
+      "Investigate relevant GitHub issues and pull requests."
+    ]
+  }
+}
