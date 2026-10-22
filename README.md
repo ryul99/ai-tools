@@ -10,6 +10,8 @@ A small collection of plugins for Codex and Claude Code.
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
 | `okf-wiki-autosave` | Yes | Yes | Optionally maintains shared OKF work documents after agent turns. |
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
+| `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
+| `okf-wiki-autosave-mod` | No | Yes (mod) | Experimental mod version of `okf-wiki-autosave`. |
 | `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
 | `tips-engineering` | Yes | Yes | Provides lazily loaded tips for software engineering workflows. |
 
@@ -41,6 +43,13 @@ claude plugin install okf-wiki-autosave@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
 claude plugin install tips-korean@ryul99-ai-tools
 claude plugin install tips-engineering@ryul99-ai-tools
+```
+
+The mod versions are optional replacements for the two hook plugins:
+
+```sh
+claude plugin install english-lecturer-mod@ryul99-ai-tools
+claude plugin install okf-wiki-autosave-mod@ryul99-ai-tools
 ```
 
 Install only the plugins you need. `okf-wiki` never installs a hook. Install

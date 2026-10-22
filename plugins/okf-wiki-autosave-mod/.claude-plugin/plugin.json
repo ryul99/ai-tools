@@ -1,0 +1,13 @@
+{
+  "name": "okf-wiki-autosave-mod",
+  "version": "0.1.0",
+  "description": "Claude Code mod that journals meaningful work into OKF worklog concepts in the background after each turn",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["okf", "wiki", "autosave", "knowledge-management", "mod"],
+  "dependencies": ["okf-wiki"]
+}

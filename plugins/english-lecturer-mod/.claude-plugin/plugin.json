@@ -1,0 +1,21 @@
+{
+  "name": "english-lecturer-mod",
+  "version": "0.1.0",
+  "description": "Claude Code mod that reviews English prompts in the background and shows the lesson above the prompt",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["english", "writing", "feedback", "mod"],
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "model": {
+      "type": "string",
+      "title": "Lesson model",
+      "description": "Model alias or ID that writes the lesson",
+      "default": "haiku"
+    }
+  }
+}

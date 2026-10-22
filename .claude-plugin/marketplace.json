@@ -13,6 +13,11 @@
       "description": "English lecturer hook - corrects and teaches English from your prompts"
     },
     {
+      "name": "english-lecturer-mod",
+      "source": "./plugins/english-lecturer-mod",
+      "description": "Experimental Claude Code mod version of english-lecturer that teaches in the background and shows the lesson above the prompt"
+    },
+    {
       "name": "council",
       "source": "./plugins/council",
       "description": "LLM Council - get answers from multiple Claude models, have them evaluate each other anonymously, and synthesize the best response"
@@ -26,6 +31,11 @@
       "name": "okf-wiki-autosave",
       "source": "./plugins/okf-wiki-autosave",
       "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when an agent finishes a turn"
+    },
+    {
+      "name": "okf-wiki-autosave-mod",
+      "source": "./plugins/okf-wiki-autosave-mod",
+      "description": "Experimental Claude Code mod version of okf-wiki-autosave that journals in the background after each turn"
     },
     {
       "name": "tips-korean",
