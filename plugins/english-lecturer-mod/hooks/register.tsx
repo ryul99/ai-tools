@@ -115,7 +115,14 @@ export const register: Register = (on, options) => {
     }
     const { Box, Button, Text } = $.ui.resolve(e)
     const dismiss = (
-      <Button key="dismiss" label="Dismiss" onPress={() => update($, lesson, () => null)} />
+      <Button
+        key="dismiss"
+        label="Dismiss"
+        hotkey="0"
+        plain
+        role="dismiss"
+        onPress={() => update($, lesson, () => null)}
+      />
     )
 
     if (view.status === 'pending') {
@@ -123,39 +130,52 @@ export const register: Register = (on, options) => {
     }
     if (view.status === 'failed') {
       return (
-        <Box gap={1}>
-          <Text dimColor>English lecturer could not write a lesson: {view.reason}</Text>
+        <Box flexDirection="column" gap={1}>
+          <Text color="red">English lecturer could not write a lesson: {view.reason}</Text>
           {dismiss}
         </Box>
       )
     }
     const { enhancedPrompt, hasCorrections, corrections, tip } = view.lesson
+    const tipLine = <Text color="yellow">✨ {tip}</Text>
     if (!hasCorrections) {
       return (
-        <Box gap={1}>
-          <Text>Tip: {tip}</Text>
+        <Box flexDirection="column" gap={1}>
+          {tipLine}
           {dismiss}
         </Box>
       )
     }
 
     return (
-      <Box flexDirection="column">
+      <Box flexDirection="column" gap={1}>
         <Text bold>{enhancedPrompt}</Text>
-        {corrections.map(item => (
-          <Box flexDirection="column">
-            <Text>
-              - {item.category}: {item.original} → <Text color="green">{item.suggestion}</Text>
-            </Text>
-            <Text dimColor>  {item.explanation}</Text>
-          </Box>
-        ))}
-        <Text>Tip: {tip}</Text>
-        <Box gap={1}>
+        <Box flexDirection="column">
+          {corrections.map((item, index) => (
+            <Box key={`correction-${index}`} flexDirection="column">
+              <Text>
+                ✅ <Text color="cyan">{item.category}</Text>: <Text color="red">{item.original}</Text>
+                {' → '}
+                <Text color="green">{item.suggestion}</Text>
+              </Text>
+              <Box paddingLeft={3}>
+                <Text dimColor>{item.explanation}</Text>
+              </Box>
+            </Box>
+          ))}
+        </Box>
+        {tipLine}
+        <Box gap={3}>
           <Button
             key="copy"
             label="Copy rewrite"
-            onPress={() => $.ui.copy({ text: enhancedPrompt, surface: e.surface })}
+            hotkey="1"
+            plain
+            variant="primary"
+            onPress={async press => {
+              const result = await $.ui.copy({ text: enhancedPrompt, surface: press.surface })
+              $.ui.toast(result.isCopied ? 'Copied the rewrite' : `Copy failed: ${result.reason}`)
+            }}
           />
           {dismiss}
         </Box>
