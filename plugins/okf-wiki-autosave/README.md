@@ -38,12 +38,12 @@ concept. Entries are bullet items grouped under one `## YYYY-MM-DD` heading
 per day, appended in chronological order; a turn on an already-journaled day
 adds a bullet under the existing day heading. Worklogs live only inside a
 dedicated directory under the bundle root (`worklog/` by default) and are
-tagged `autosave-worklog`. Planner-written content is sanitized before it
-lands in a document: Markdown heading lines inside journal entries are demoted
-to bold text so they cannot collide with the per-day date headings.
+tagged `autosave-worklog`.
 
 Each entry is planned as three fields and rendered by the hook into one
-bullet, so a line stays legible without its neighbours:
+bullet. Fields are flattened to a single line, stripped of backticks, and
+truncated, so no entry can break out of its bullet or collide with a day
+heading:
 
 ```md
 - `[suggestions GEPA v4]` cand9를 최종 채택. (PR #1651 · SEARCH-4955)
@@ -62,14 +62,14 @@ bullet, so a line stays legible without its neighbours:
   keys, commits, branches, file paths) and trail the summary in parentheses.
   The trailer is omitted when the turn produced none.
 
-Fields are flattened to a single line, stripped of backticks, and truncated
-before rendering, so no entry can break out of its bullet.
-
-Entries leave out lists of people's names, issue-tracker housekeeping (sprint,
-board, status, or assignee changes), transient states such as "not committed
-yet", and test counts. Turns that only change status — a push, a description
-touch-up, tracker housekeeping, a progress update with no new result — are not
-journaled.
+The planner journals only the latest turn: the last prompt a person sent and
+the work that followed it, trimmed to keep that prompt and the newest messages.
+The closing assistant message of the turn before rides along so a short request
+such as "commit it" can be understood, and the current git branch is the only
+workspace state passed. Status-only turns (a push, a description touch-up,
+tracker housekeeping, a progress update with no new result) are skipped, and
+entries leave out people's names, tracker housekeeping, transient states such
+as "not committed yet", and test counts.
 
 - Work that continues an existing worklog is appended to the same concept; new
   work creates a new concept with a new slug. The full slug index plus the

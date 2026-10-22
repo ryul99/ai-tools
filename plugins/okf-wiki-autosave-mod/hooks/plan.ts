@@ -9,7 +9,7 @@ export type PlannerContext = {
 
 export type ApplyResult = { logged: string | null }
 
-export type Plan = { material_change: boolean; worklog: unknown }
+export type Plan = { worklog: unknown }
 
 export function forkPrompt(context: PlannerContext): string {
   const data = JSON.stringify({ workspace: context.workspace, worklogs: context.worklogs })
@@ -40,10 +40,9 @@ export function parsePlan(reply: string): Plan | undefined {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     return undefined
   }
-  const plan = value as Record<string, unknown>
-  if (typeof plan.material_change !== 'boolean' || !('worklog' in plan)) {
+  if (!('worklog' in value)) {
     return undefined
   }
 
-  return { material_change: plan.material_change, worklog: plan.worklog }
+  return { worklog: value.worklog }
 }

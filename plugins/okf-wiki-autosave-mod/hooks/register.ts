@@ -62,7 +62,7 @@ async function journal($: EngineInterface, answer: string): Promise<void> {
     $.ui.toast('OKF autosave failed: the planner reply was not an update plan')
     return
   }
-  if (!plan.material_change) {
+  if (plan.worklog === null) {
     return
   }
   const applied = await runScript<ApplyResult>(
