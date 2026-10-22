@@ -1,6 +1,6 @@
 {
   "name": "english-lecturer-mod",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Claude Code mod that reviews English prompts in the background and shows the lesson above the prompt",
   "author": {
     "name": "ryul99",
