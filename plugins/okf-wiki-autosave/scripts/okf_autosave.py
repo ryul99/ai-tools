@@ -328,23 +328,26 @@ def planner_prompt(evidence_note: str = STDIN_EVIDENCE_NOTE) -> str:
 Return a structured update plan under these rules:
 - Record only durable work facts supported by the current evidence.
 - Never record session IDs, transcript paths, chat mechanics, credentials, or speculative claims.
+- Leave out detail that does not help a later reader find or understand the work: lists of people's names, issue-tracker housekeeping (sprint, board, status, or assignee changes), transient states such as "not committed yet" or "awaiting confirmation", and test counts. Report verification only as passed or failed.
 - Do not mark tests or verification as successful unless the evidence reports the real result.
 - Do not turn plans into completed work.
 - Prefer no change over a low-confidence or redundant update.
 - Always emit every field the schema marks as required, even when there is nothing to record: a no-op plan is {"material_change": false, "worklog": null}.
 
 The "worklog" field appends a journal entry to a dedicated worklog directory:
-- Set "worklog" to null when the turn contains no meaningful work (plain Q&A, short confirmations, exploration without conclusions).
+- Set "worklog" to null when the turn contains no meaningful work (plain Q&A, short confirmations, exploration without conclusions) or only changes status: a push, a pull request or issue description touch-up, issue-tracker housekeeping, or a progress update with no new result.
 - worklogs.index lists every existing worklog slug with its title; worklogs.details holds the worklogs most relevant to the evidence, with a body excerpt.
 - When the turn continues the task of any worklog in worklogs.index, reuse that slug — prefer reusing an existing slug over creating a new one. Only when nothing matches, choose a new slug naming the task: ASCII lowercase kebab-case (letters, digits, hyphens; at most 64 characters).
 - "title" is a short human-readable task title, used only when the worklog is first created.
 
 "entry" records this turn only. Its three fields are rendered into one dated bullet, so write plain text in each: no Markdown headings, bullet markers, or line breaks.
 - "scope" is a short tag naming what the work was about — the project, component, experiment, document, or incident. It is what a reader scans first, so make it specific enough to tell this entry apart from neighbouring ones. Never write "the same as above" or point at another entry.
-- "summary" states what was done, why it was done, and the real outcome, in one to four sentences. Every entry must be readable on its own: name the subject instead of writing "it", "this", or "the previous run", and say what an internal shorthand (candidate name, version label, scenario ID, run number) refers to the first time it appears.
+- "summary" states what was done, why it was done, and the real outcome, in one or two sentences. Every entry must be readable on its own: name the subject instead of writing "it", "this", or "the previous run", and say what an internal shorthand (candidate name, version label, scenario ID, run number) refers to the first time it appears.
 - "refs" lists verifiable anchors that already appear in the evidence — pull request numbers, issue keys, commit hashes, branch names, file paths. Keep it to the few that best locate the work rather than every file the turn touched; prefer a pull request or issue key over a file path. Use an empty array when the evidence offers none, and never invent one.
 - Write "scope" and "summary" in the language the worklog body already uses; for a new worklog, follow the language of the evidence.
-- Do not journal work that body_tail already records as a new entry. Naming the subject and its background again is not a repeat — it is what makes an entry stand alone.
+- Do not journal work that body_tail already records as a new entry. Naming the subject again is not a repeat — it is what makes an entry stand alone — but retelling its background is.
+- When the turn is a follow-up step of a task body_tail already records — a commit, an opened pull request, applied review feedback — name the task and state only what is new, such as the commit hash, the pull request, or the changed decision, in one sentence.
+- When the turn overturns a conclusion that an earlier entry recorded, say which conclusion it overturns and state the corrected one, so the worklog does not leave the earlier conclusion standing.
 """
 
 
@@ -749,13 +752,16 @@ def split_worklog_body(body: str, budget: int) -> tuple[list[list[tuple[str, str
     """
     preamble, blocks = worklog_day_blocks(body)
 
-    def measure(items: list[tuple[str, str]]) -> int:
-        return sum(len(text) for _, text in items)
+    def size(text: str) -> int:
+        return len(text.encode("utf-8"))
 
-    if len(blocks) < 2 or len(preamble) + measure(blocks) <= budget:
+    def measure(items: list[tuple[str, str]]) -> int:
+        return sum(size(text) for _, text in items)
+
+    if len(blocks) < 2 or size(preamble) + measure(blocks) <= budget:
         return [], body
     sealed: list[list[tuple[str, str]]] = []
-    while len(blocks) > 1 and len(preamble) + measure(blocks) > budget:
+    while len(blocks) > 1 and size(preamble) + measure(blocks) > budget:
         take = 1
         while take < len(blocks) - 1 and measure(blocks[: take + 1]) <= budget:
             take += 1

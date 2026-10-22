@@ -52,15 +52,24 @@ bullet, so a line stays legible without its neighbours:
 - `scope` is the leading tag naming the project, component, experiment, or
   document the work was about. It is wrapped in inline code so a bracketed tag
   is never parsed as a Markdown link.
-- `summary` states what was done, why, and the real outcome, and must be
-  readable on its own — the planner is told to name subjects instead of using
-  pronouns and to expand internal shorthand on first use.
+- `summary` states what was done, why, and the real outcome in one or two
+  sentences, and must be readable on its own — the planner is told to name
+  subjects instead of using pronouns and to expand internal shorthand on first
+  use. A follow-up step of an already-journaled task (a commit, a pull request,
+  applied review feedback) records only what is new, and a correction names
+  the earlier conclusion it overturns.
 - `refs` are verifiable anchors taken from the evidence (pull requests, issue
   keys, commits, branches, file paths) and trail the summary in parentheses.
   The trailer is omitted when the turn produced none.
 
 Fields are flattened to a single line, stripped of backticks, and truncated
 before rendering, so no entry can break out of its bullet.
+
+Entries leave out lists of people's names, issue-tracker housekeeping (sprint,
+board, status, or assignee changes), transient states such as "not committed
+yet", and test counts. Turns that only change status — a push, a description
+touch-up, tracker housekeeping, a progress update with no new result — are not
+journaled.
 
 - Work that continues an existing worklog is appended to the same concept; new
   work creates a new concept with a new slug. The full slug index plus the
