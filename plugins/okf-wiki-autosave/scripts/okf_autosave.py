@@ -807,11 +807,8 @@ def next_partition_index(root: Path, worklog_dir: str, slug: str) -> int:
 
 
 def worklog_frontmatter(root: Path, concept_id: str) -> dict[str, Any]:
-    shown = run_okf(root, "show", concept_id, "--frontmatter-only")
-    if not isinstance(shown, dict):
-        return {}
-    nested = shown.get("frontmatter")
-    return nested if isinstance(nested, dict) else shown
+    frontmatter = run_okf(root, "meta", "get", concept_id)
+    return frontmatter if isinstance(frontmatter, dict) else {}
 
 
 def worklog_partition_tags(frontmatter: dict[str, Any]) -> list[str]:
