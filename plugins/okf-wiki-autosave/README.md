@@ -26,9 +26,9 @@ Install autosave and its base-plugin dependency:
 claude plugin install okf-wiki-autosave@ryul99-ai-tools
 ```
 
-The hook requires `okf` and the host CLI (`codex` or `claude`) on `PATH`, an
-active matching subscription login, and either an OKF bundle in the current
-directory hierarchy or an `OKF_ROOT` value.
+The hook requires `okf` 0.2.0 or newer (for `okf body`) and the host CLI
+(`codex` or `claude`) on `PATH`, an active matching subscription login, and
+either an OKF bundle in the current directory hierarchy or an `OKF_ROOT` value.
 
 ## Worklog journaling
 
@@ -77,9 +77,11 @@ as "not committed yet", and test counts.
   even for work resumed after a long gap.
 - Files outside the worklog directory are never created. `index.md` and
   `log.md` are never modified.
-- Created concepts get valid frontmatter via `okf new` and every write is
-  validated with `okf validate`, link checks, and citation checks; failed
-  checks roll the write back.
+- Created concepts get valid frontmatter via `okf new`, and every body write
+  goes through `okf body set --if-match`, which keeps the frontmatter bytes
+  unchanged and refuses the write when the worklog changed after it was read.
+  If a rollover cannot finish, the partitions it created are removed and the
+  worklog is left as it was.
 
 ## Rollover
 

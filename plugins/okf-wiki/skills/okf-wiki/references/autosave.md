@@ -23,9 +23,9 @@ line identifies its own subject and outcome without the surrounding entries.
 Read the scope tags to scan a worklog; the refs point at the pull requests,
 issues, commits, and files the entry came from.
 
-Worklog writes use a deterministic writer, atomic writes, and post-write
-validation with rollback. Concepts are only ever created inside the worklog
-directory. Treat worklog concepts as machine-owned journals; move durable
+Worklog bodies are written with `okf body set --if-match`, so the frontmatter
+stays unchanged and a concurrent edit makes the write fail instead of being
+overwritten. Concepts are only ever created inside the worklog directory. Treat worklog concepts as machine-owned journals; move durable
 conclusions into curated concepts manually.
 
 ## Read a partitioned worklog
@@ -50,9 +50,10 @@ Claude Code uses a tool-free `claude -p` child; Codex uses an ephemeral
 and a read-only sandbox. The child uses the matching subscription login and
 returns a bounded journaling plan.
 
-The deterministic writer enforces the slug pattern, confidence, content
-hashes, and atomic writes. It validates bodies, links, and citations after
-applying a plan and restores originals if checks fail. Hook receipts are
+The deterministic writer enforces the slug pattern and confidence threshold,
+then writes bodies through `okf body set --if-match`. A rollover writes its
+sealed partitions before the active worklog and removes them if a later write
+fails, so a failed plan leaves the worklog as it was. Hook receipts are
 content fingerprints in plugin data; they contain no session ID or transcript.
 
 ## Configure operation

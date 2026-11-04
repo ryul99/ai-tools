@@ -123,13 +123,14 @@ def run_process(
     )
 
 
-def run_okf(root: Path, *arguments: str) -> Any:
+def run_okf(root: Path, *arguments: str, input_text: str | None = None) -> Any:
     executable = shutil.which("okf")
     if executable is None:
         raise AutosaveError("okf command is not available")
     result = run_process(
         [executable, "--root", str(root), "--format", "json", *arguments],
         cwd=root,
+        input_text=input_text,
     )
     if result.returncode != 0:
         detail = result.stderr.strip() or result.stdout.strip() or f"exit {result.returncode}"
@@ -555,17 +556,6 @@ def request_plan(
     return request_claude_plan(root, prompt, payload, schema)
 
 
-def split_frontmatter(raw: bytes) -> tuple[bytes, bytes]:
-    if not raw.startswith((b"---\n", b"---\r\n")):
-        raise AutosaveError("worklog concept is missing frontmatter")
-    lines = raw.splitlines(keepends=True)
-    for index, line in enumerate(lines[1:], start=1):
-        if line.rstrip(b"\r\n") == b"---":
-            boundary = sum(len(item) for item in lines[: index + 1])
-            return raw[:boundary], raw[boundary:]
-    raise AutosaveError("worklog concept has unterminated frontmatter")
-
-
 def heading_matches(body: str) -> list[tuple[int, int, int, str]]:
     matches: list[tuple[int, int, int, str]] = []
     pattern = re.compile(r"(?m)^(#{1,6})[ \t]+(.+?)[ \t]*\r?$\n?")
@@ -589,29 +579,20 @@ def safe_concept_path(root: Path, concept_id: str) -> Path:
     return path
 
 
-def file_hash(raw: bytes) -> str:
-    return hashlib.sha256(raw).hexdigest()
+def read_body(root: Path, concept_id: str) -> tuple[str, str]:
+    shown = run_okf(root, "body", "get", concept_id)
+    body = shown.get("body") if isinstance(shown, dict) else None
+    identity = shown.get("identity") if isinstance(shown, dict) else None
+    if not isinstance(body, str) or not isinstance(identity, str):
+        raise AutosaveError(f"okf body get returned an unexpected result: {concept_id}")
+    return body, identity
 
 
-def atomic_write(path: Path, raw: bytes, expected_hash: str) -> None:
-    try:
-        current = path.read_bytes()
-    except OSError as exc:
-        raise AutosaveError(f"cannot recheck {path.name}: {exc}") from exc
-    if file_hash(current) != expected_hash:
-        raise AutosaveError(f"concurrent change detected: {path.name}")
-    descriptor, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
-    temporary_path = Path(temporary)
-    try:
-        with os.fdopen(descriptor, "wb") as stream:
-            os.fchmod(stream.fileno(), path.stat().st_mode)
-            stream.write(raw)
-            stream.flush()
-            os.fsync(stream.fileno())
-        os.replace(temporary_path, path)
-    except OSError as exc:
-        temporary_path.unlink(missing_ok=True)
-        raise AutosaveError(f"cannot write {path.name}: {exc}") from exc
+def write_body(root: Path, concept_id: str, body: str, identity: str | None = None) -> None:
+    arguments = ["body", "set", concept_id]
+    if identity is not None:
+        arguments.extend(["--if-match", identity])
+    run_okf(root, *arguments, input_text=body)
 
 
 def confidence_threshold(name: str, default: str) -> float:
@@ -855,9 +836,11 @@ def seal_worklog_partition(
     for tag in tags:
         arguments.extend(["--tag", tag])
     run_okf(root, *arguments)
-    created = path.read_bytes()
-    prefix, _ = split_frontmatter(created)
-    atomic_write(path, prefix + body.encode("utf-8"), file_hash(created))
+    try:
+        write_body(root, concept_id, body)
+    except Exception:
+        path.unlink(missing_ok=True)
+        raise
     return path
 
 
@@ -903,21 +886,14 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
             "--generated-by",
             "okf-wiki-autosave",
         )
-    original = path.read_bytes()
-    prefix, body_bytes = split_frontmatter(original)
-    try:
-        body = body_bytes.decode("utf-8")
-    except UnicodeDecodeError as exc:
-        raise AutosaveError(f"worklog body is not UTF-8: {concept_id}") from exc
+    body, identity = read_body(root, concept_id)
     stamp = time.strftime("%Y-%m-%d")
     updated = append_worklog_entry(body, stamp, rendered)
     budget = worklog_budget()
     groups: list[list[tuple[str, str]]] = []
     if budget is not None:
         groups, updated = split_worklog_body(updated, budget)
-    proposed = prefix + updated.encode("utf-8")
-    partitions: list[tuple[str, Path]] = []
-    wrote_active = False
+    partitions: list[Path] = []
     try:
         if groups:
             frontmatter = worklog_frontmatter(root, concept_id)
@@ -925,34 +901,25 @@ def apply_worklog(root: Path, worklog_dir: str, plan: dict[str, Any]) -> str | N
             tags = worklog_partition_tags(frontmatter)
             index = next_partition_index(root, worklog_dir, slug)
             for group in groups:
-                partition_id = f"{worklog_dir}/{slug}-{index}"
                 span = f"{group[0][0]} ~ {group[-1][0]}"
                 partitions.append(
-                    (
-                        partition_id,
-                        seal_worklog_partition(
-                            root,
-                            partition_id,
-                            f"{base_title} ({span})",
-                            tags,
-                            "".join(text for _, text in group),
-                        ),
+                    seal_worklog_partition(
+                        root,
+                        f"{worklog_dir}/{slug}-{index}",
+                        f"{base_title} ({span})",
+                        tags,
+                        "".join(text for _, text in group),
                     )
                 )
                 index += 1
-        atomic_write(path, proposed, file_hash(original))
-        wrote_active = True
-        for checked in [concept_id, *(partition_id for partition_id, _ in partitions)]:
-            run_okf(root, "validate", checked)
-            run_okf(root, "links", "check", checked)
-            run_okf(root, "citations", "check", checked)
+        # The active worklog is written last, so a failure before it leaves only new
+        # partitions to remove, and nothing can fail after it.
+        write_body(root, concept_id, updated, identity)
     except Exception:
-        for _, partition_path in partitions:
+        for partition_path in partitions:
             partition_path.unlink(missing_ok=True)
         if created:
             path.unlink(missing_ok=True)
-        elif wrote_active:
-            atomic_write(path, original, file_hash(proposed))
         raise
     return concept_id
 
