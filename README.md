@@ -12,6 +12,7 @@ A small collection of plugins for Codex and Claude Code.
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
 | `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
 | `okf-wiki-autosave-mod` | No | Yes (mod) | Experimental mod version of `okf-wiki-autosave`. |
+| `okf-wiki-handoff-mod` | No | Yes (mod) | Experimental mod that replaces context compaction with an OKF handoff note. |
 | `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
 | `tips-engineering` | Yes | Yes | Provides lazily loaded tips for software engineering workflows. |
 
@@ -50,6 +51,14 @@ The mod versions are optional replacements for the two hook plugins:
 ```sh
 claude plugin install english-lecturer-mod@ryul99-ai-tools
 claude plugin install okf-wiki-autosave-mod@ryul99-ai-tools
+```
+
+The handoff mod has no hook version. It replaces Claude Code's context
+compaction with a handoff note saved in its own OKF bundle under `~/.claude`;
+see its [README](plugins/okf-wiki-handoff-mod/README.md):
+
+```sh
+claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
 ```
 
 Install only the plugins you need. `okf-wiki` never installs a hook. Install

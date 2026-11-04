@@ -28,6 +28,17 @@ stays unchanged and a concurrent edit makes the write fail instead of being
 overwritten. Concepts are only ever created inside the worklog directory. Treat worklog concepts as machine-owned journals; move durable
 conclusions into curated concepts manually.
 
+## Recognize handoff notes
+
+The optional `okf-wiki-handoff-mod` for Claude Code replaces context
+compaction with a handoff note. Handoffs live in their own bundle,
+`~/.claude/okf-handoff` (under `$CLAUDE_CONFIG_DIR` when set), as
+`handoff/<project-key>/<slug>` with type `Handoff` and tag `autosave-handoff`,
+never in the user's wiki. Inspect them with `--root` pointing at that bundle.
+A handoff is overwritten on every compaction of the session that writes it, so
+treat it as machine-owned like a worklog. Its `segments` frontmatter points at
+transcript line ranges that the mod's `recall` tool reads.
+
 ## Read a partitioned worklog
 
 A worklog that outgrows its byte budget sheds its oldest days into sealed

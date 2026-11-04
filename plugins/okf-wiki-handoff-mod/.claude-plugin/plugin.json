@@ -1,0 +1,13 @@
+{
+  "name": "okf-wiki-handoff-mod",
+  "version": "0.1.0",
+  "description": "Claude Code mod that replaces context compaction with a handoff note saved in an OKF bundle and recallable archived originals",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["okf", "wiki", "handoff", "compaction", "context", "mod"],
+  "dependencies": ["okf-wiki"]
+}

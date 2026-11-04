@@ -38,6 +38,11 @@
       "description": "Experimental Claude Code mod version of okf-wiki-autosave that journals in the background after each turn"
     },
     {
+      "name": "okf-wiki-handoff-mod",
+      "source": "./plugins/okf-wiki-handoff-mod",
+      "description": "Experimental Claude Code mod that replaces context compaction with an OKF handoff note and recallable archived originals"
+    },
+    {
       "name": "tips-korean",
       "source": "./plugins/tips-korean",
       "description": "A growing collection of lazily loaded tips for Korean users, the Korean language, and Korea-related contexts"
