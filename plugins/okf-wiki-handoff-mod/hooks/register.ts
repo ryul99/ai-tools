@@ -180,6 +180,33 @@ async function lineCount($: EngineInterface, path: string): Promise<number | und
   return ran.exitCode === 0 && Number.isFinite(count) ? count : undefined
 }
 
+/**
+ * A mod installed or reloaded mid-session has seen no classic event before its
+ * first compaction, so the transcript is then found by the session's id, which
+ * names the file in one of the `projects/` folders.
+ */
+async function transcriptPath(
+  $: EngineInterface,
+  captured: string | undefined,
+): Promise<string | undefined> {
+  if (captured !== undefined) {
+    return captured
+  }
+  const projects = `${await claudeDirectory($)}/projects`
+  if (!(await $.fs.exists(projects))) {
+    return undefined
+  }
+  const name = `${await $.session.id()}.jsonl`
+  for (const entry of await $.fs.list(projects)) {
+    const path = `${projects}/${entry.name}/${name}`
+    if (entry.kind === 'dir' && (await $.fs.exists(path))) {
+      return path
+    }
+  }
+
+  return undefined
+}
+
 async function sessionKey($: EngineInterface): Promise<string> {
   return `session:${await $.session.id()}`
 }
@@ -326,7 +353,7 @@ export const register: Register = on => {
     }
     $.ui.status('okf handoff: writing')
     try {
-      return await replaceWithHandoff($, e, transcript)
+      return await replaceWithHandoff($, e, await transcriptPath($, transcript))
     } catch (error) {
       $.ui.toast(`okf handoff failed, compacting as usual: ${errorText(error)}`)
 
