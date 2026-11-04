@@ -35,8 +35,8 @@ offered for reuse. `OKF_ROOT` does not affect where handoffs go. Read them with
 Every compaction of the main conversation, automatic or `/compact`, is
 replaced. Subagent compactions are left to Claude Code.
 
-1. A fork of the conversation writes a handoff with `## Goal`, `## State`,
-   `## Decisions and constraints`, `## Next steps`, and `## Open questions`.
+1. A fork of the conversation writes a handoff with `# Goal`, `# State`,
+   `# Decisions and constraints`, `# Next steps`, and `# Open questions`.
    Text passed to `/compact` is given to it as what to keep or stress.
 2. The note is saved as `handoff/<project-key>/<slug>` (type `Handoff`, tag
    `autosave-handoff`) with `okf new`, `okf meta set`, and
@@ -54,7 +54,7 @@ compaction is skipped because the handoff is written when the compaction runs.
 
 Each compaction archives the conversation it replaces as a numbered segment of
 its handoff. A segment is a pointer, the transcript file and line range, kept
-in the note's `segments` frontmatter; the body's `## Archived segments` section
+in the note's `segments` frontmatter; the body's `# Archived segments` section
 lists the segment numbers and line ranges.
 
 The model reads a segment back with the `mcp__okf-wiki-handoff-mod__recall`

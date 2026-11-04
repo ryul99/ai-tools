@@ -58,11 +58,11 @@ ${JSON.stringify(PLAN_SCHEMA)}
 - ${slugRule}
 - "title": a short title for the task.
 - "handoff": Markdown in the language of the conversation, with these sections in this order:
-  - "## Goal": what the person asked for and what finished looks like.
-  - "## State": what is done and what is in progress, with exact file paths, branches, commands, identifiers, and changes not committed yet.
-  - "## Decisions and constraints": rules the person set in this conversation and decisions already made. Keep a rule's own wording where it matters; never soften or paraphrase a constraint. Leave out instructions from the system prompt and CLAUDE.md files, which stay in the context on their own.
-  - "## Next steps": the concrete next actions, in order.
-  - "## Open questions": what is unresolved or waiting on the person, or "None." when nothing is.
+  - "# Goal": what the person asked for and what finished looks like.
+  - "# State": what is done and what is in progress, with exact file paths, branches, commands, identifiers, and changes not committed yet.
+  - "# Decisions and constraints": rules the person set in this conversation and decisions already made. Keep a rule's own wording where it matters; never soften or paraphrase a constraint. Leave out instructions from the system prompt and CLAUDE.md files, which stay in the context on their own.
+  - "# Next steps": the concrete next actions, in order.
+  - "# Open questions": what is unresolved or waiting on the person, or "None." when nothing is.
 Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages. Do not add an archive section; the plugin appends one.
 ${instructions}${recent}
 <known>
@@ -168,7 +168,7 @@ export function archiveSection(segments: readonly Segment[]): string {
       `- #${index + 1}: transcript lines ${segment.from}-${segment.to}, archived ${segment.at}`,
   )
 
-  return `## Archived segments
+  return `# Archived segments
 
 The original conversation is archived as the transcript line ranges in this note's
 \`segments\` frontmatter. Read a segment with the \`recall\` tool of okf-wiki-handoff-mod.
