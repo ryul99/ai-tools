@@ -1,0 +1,50 @@
+{
+  "description": "Keep a per-session OKF handoff note current and bring it back after context compaction.",
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "timeout": 30
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "timeout": 60,
+            "statusMessage": "Archiving the compacted conversation for the handoff note"
+          }
+        ]
+      }
+    ]
+  }
+}

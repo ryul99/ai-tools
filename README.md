@@ -9,6 +9,7 @@ A small collection of plugins for Codex and Claude Code.
 | `council` | Yes | Yes | Uses multiple model perspectives to evaluate and synthesize answers. |
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
 | `okf-wiki-autosave` | Yes | Yes | Optionally maintains shared OKF work documents after agent turns. |
+| `okf-wiki-handoff` | Yes | Yes | Keeps a per-session OKF handoff note current and shows it again after context compaction. |
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
 | `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
 | `okf-wiki-autosave-mod` | No | Yes (mod) | Experimental mod version of `okf-wiki-autosave`. |
@@ -25,13 +26,14 @@ codex plugin marketplace add ryul99/ai-tools
 codex plugin add council@ryul99-ai-tools
 codex plugin add okf-wiki@ryul99-ai-tools
 codex plugin add okf-wiki-autosave@ryul99-ai-tools
+codex plugin add okf-wiki-handoff@ryul99-ai-tools
 codex plugin add english-lecturer@ryul99-ai-tools
 codex plugin add tips-korean@ryul99-ai-tools
 codex plugin add tips-engineering@ryul99-ai-tools
 ```
 
-Codex does not infer the autosave plugin's Claude-specific dependency metadata,
-so install both `okf-wiki` and `okf-wiki-autosave`. After installing either
+Codex does not infer the Claude-specific dependency metadata of the autosave
+and handoff plugins, so install `okf-wiki` alongside them. After installing a
 hook plugin, open `/hooks` in Codex and trust its hook definition before use.
 
 ### Claude Code
@@ -41,6 +43,7 @@ claude plugin marketplace add ryul99/ai-tools
 claude plugin install council@ryul99-ai-tools
 claude plugin install okf-wiki@ryul99-ai-tools
 claude plugin install okf-wiki-autosave@ryul99-ai-tools
+claude plugin install okf-wiki-handoff@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
 claude plugin install tips-korean@ryul99-ai-tools
 claude plugin install tips-engineering@ryul99-ai-tools
@@ -53,9 +56,12 @@ claude plugin install english-lecturer-mod@ryul99-ai-tools
 claude plugin install okf-wiki-autosave-mod@ryul99-ai-tools
 ```
 
-The handoff mod has no hook version. It replaces Claude Code's context
-compaction with a handoff note saved in its own OKF bundle under `~/.claude`;
-see its [README](plugins/okf-wiki-handoff-mod/README.md):
+The handoff mod is an alternative to `okf-wiki-handoff`, not a replacement for
+it. Where the hook plugin keeps a note current and shows it next to the CLI's
+compaction summary, the mod replaces Claude Code's context compaction with a
+handoff note; see the [hook plugin README](plugins/okf-wiki-handoff/README.md)
+and the [mod README](plugins/okf-wiki-handoff-mod/README.md). Install only one
+of the two:
 
 ```sh
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools

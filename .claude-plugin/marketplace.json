@@ -38,6 +38,11 @@
       "description": "Experimental Claude Code mod version of okf-wiki-autosave that journals in the background after each turn"
     },
     {
+      "name": "okf-wiki-handoff",
+      "source": "./plugins/okf-wiki-handoff",
+      "description": "Keep a per-session OKF handoff note current and bring it back, with recallable archived originals, after context compaction"
+    },
+    {
       "name": "okf-wiki-handoff-mod",
       "source": "./plugins/okf-wiki-handoff-mod",
       "description": "Experimental Claude Code mod that replaces context compaction with an OKF handoff note and recallable archived originals"

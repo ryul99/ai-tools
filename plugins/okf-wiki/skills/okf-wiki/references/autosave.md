@@ -30,14 +30,18 @@ conclusions into curated concepts manually.
 
 ## Recognize handoff notes
 
-The optional `okf-wiki-handoff-mod` for Claude Code replaces context
-compaction with a handoff note. Handoffs live in their own bundle,
-`~/.claude/okf-handoff` (under `$CLAUDE_CONFIG_DIR` when set), as
-`handoff/<project-key>/<slug>` with type `Handoff` and tag `autosave-handoff`,
-never in the user's wiki. Inspect them with `--root` pointing at that bundle.
-A handoff is overwritten on every compaction of the session that writes it, so
-treat it as machine-owned like a worklog. Its `segments` frontmatter points at
-transcript line ranges that the mod's `recall` tool reads.
+Two optional plugins keep handoff notes. `okf-wiki-handoff`, for Codex and
+Claude Code, has the agent keep a per-session note current and shows it again
+after context compaction. `okf-wiki-handoff-mod`, for Claude Code only,
+replaces context compaction with a handoff note. Handoffs live in their own
+bundle under the CLI's configuration directory, `~/.claude/okf-handoff` (under
+`$CLAUDE_CONFIG_DIR` when set) or, for Codex, `~/.codex/okf-handoff` (under
+`$CODEX_HOME` when set), never in the user's wiki. Each is
+`handoff/<project-key>/<slug>` with type `Handoff` and tag `autosave-handoff`;
+the hook plugin's slug is the session ID. Inspect them with `--root` pointing
+at that bundle. Notes are rewritten by the session that owns them, so treat
+them as machine-owned like a worklog. Their `segments` frontmatter points at
+transcript line ranges that the plugins' `recall` tools read.
 
 ## Read a partitioned worklog
 

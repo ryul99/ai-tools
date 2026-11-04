@@ -1,0 +1,13 @@
+{
+  "name": "okf-wiki-handoff",
+  "version": "0.1.0",
+  "description": "Keeps a per-session OKF handoff note current and brings it back, with recallable archived originals, after Claude Code compacts the context.",
+  "author": {
+    "name": "ryul99",
+    "url": "https://github.com/ryul99"
+  },
+  "homepage": "https://github.com/ryul99/ai-tools",
+  "repository": "https://github.com/ryul99/ai-tools",
+  "keywords": ["okf", "wiki", "handoff", "compaction", "context", "hooks", "mcp"],
+  "dependencies": ["okf-wiki"]
+}

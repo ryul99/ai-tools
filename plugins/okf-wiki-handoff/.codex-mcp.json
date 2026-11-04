@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "okf-handoff": {
+      "command": "python3",
+      "args": ["./scripts/okf_handoff.py", "mcp", "--host", "codex"],
+      "cwd": "."
+    }
+  }
+}
