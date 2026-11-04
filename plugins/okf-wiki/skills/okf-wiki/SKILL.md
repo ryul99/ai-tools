@@ -5,12 +5,12 @@ description: Manage file-based Open Knowledge Format (OKF) wiki bundles with the
 
 # OKF Wiki
 
-Use `okf` for structural and metadata operations while keeping Markdown files authoritative. Assume the command is installed and invoke it directly.
+Use `okf` for structural, metadata, and body operations while keeping Markdown files authoritative. Assume the command is installed and invoke it directly.
 
 ## Route the task
 
 - For command syntax, shared flags, filters, output, and exit codes, read [references/commands.md](references/commands.md).
-- For bundle creation, concept authoring, frontmatter, and tags, read [references/authoring-workflow.md](references/authoring-workflow.md).
+- For bundle creation, concept authoring, body writes, frontmatter, and tags, read [references/authoring-workflow.md](references/authoring-workflow.md).
 - For sources, citations, verification, trust, and lifecycle state, read [references/provenance-lifecycle.md](references/provenance-lifecycle.md).
 - For validation, link checks, citation checks, diagnostics, and CI behavior, read [references/validation-diagnostics.md](references/validation-diagnostics.md).
 - For the optional Claude Code autosave companion, managed shared documents, and automatic update boundaries, read [references/autosave.md](references/autosave.md).
@@ -26,14 +26,14 @@ Read only the references needed for the current request.
    3. Otherwise, if the `OKF_ROOT` environment variable is non-empty, validate that path and pass it as `--root "$OKF_ROOT"`.
    4. Otherwise, ask the user for the wiki root before running a bundle-dependent command.
 2. Inspect the relevant concepts and metadata before proposing a change. Prefer `--format json` when interpreting command output programmatically.
-3. Make the narrowest requested change. Edit Markdown prose directly with filesystem tools; use `okf` for bundle structure and frontmatter.
+3. Make the narrowest requested change. Edit Markdown prose with filesystem tools, or replace a whole body with `okf body set` when the frontmatter must stay byte-for-byte unchanged or the write must fail on a concurrent change; use `okf` for bundle structure and frontmatter.
 4. Run every mutating `okf` command with `--dry-run` first and review the complete proposal.
 5. Execute the same command without `--dry-run` only after the proposal matches the request.
 6. Run `okf validate` after changes. Also run link and citation checks when bodies, paths, sources, or citations may have changed.
 
 ## Preserve authority and scope
 
-- Do not expect `okf` to author, rewrite, or reformat existing Markdown prose. The targeted destination rewrite performed by `okf move` is the exception.
+- Do not expect `okf` to compose or reformat Markdown prose. `okf body set` writes exactly the body you supply, and `okf move` rewrites only affected link destinations.
 - Do not update `index.md` or `log.md` unless the user explicitly requests authored changes. Allow `okf init` to create `index.md` and `okf move` to update affected link destinations.
 - Do not invent actors, provenance, verification events, sources, lifecycle dates, or metadata values.
 - Do not create a root-path state file or modify `OKF_ROOT` or shell startup files. Treat an explicitly supplied root as current-request context only.

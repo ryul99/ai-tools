@@ -65,12 +65,12 @@ Trust tiers are derived from verification records:
 Use semantic lifecycle commands:
 
 ```sh
-okf lifecycle set-status metrics/revenue stable --dry-run
-okf lifecycle set-stale-after metrics/revenue 2026-12-01 --dry-run
-okf lifecycle clear-stale-after metrics/revenue --dry-run
-okf lifecycle report --stale --format json
+okf lifecycle set metrics/revenue status stable --dry-run
+okf lifecycle set metrics/revenue stale_after 2026-12-01 --dry-run
+okf lifecycle unset metrics/revenue stale_after --dry-run
+okf list --stale --format json
 ```
 
-Valid statuses are `draft`, `stable`, and `deprecated`. A concept is stale when the evaluation date is on or after `stale_after`. Use `--today YYYY-MM-DD` when reports or tests must be reproducible.
+Valid statuses are `draft`, `stable`, and `deprecated`; a concept without `status` is treated as `stable`. Report lifecycle state with `okf list --stale` or `--due-before YYYY-MM-DD`; its JSON records include `stale_after` and `latest_verification`. A concept is stale when the evaluation date is on or after `stale_after`. Use `--today YYYY-MM-DD` when reports or tests must be reproducible.
 
 After provenance, verification, or lifecycle changes, run `okf validate`. Also run citation checks after source changes and link checks when status changes could expose stable-to-deprecated references.

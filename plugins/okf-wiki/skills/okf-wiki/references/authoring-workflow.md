@@ -16,13 +16,13 @@ Initialization creates only the root `index.md`; it does not initialize Git or c
 1. Choose a bundle-relative concept ID and a producer-defined, non-empty type.
 2. Preview the new file.
 3. Create it.
-4. Edit the Markdown body directly with filesystem editing tools.
+4. Write the Markdown body with filesystem editing tools or `okf body set`.
 5. Validate the concept or bundle.
 
 ```sh
 okf new tables/orders --type "BigQuery Table" --title "Orders" --dry-run
 okf new tables/orders --type "BigQuery Table" --title "Orders"
-# Edit tables/orders.md directly.
+# Edit tables/orders.md directly, or write the body as shown below.
 okf validate tables/orders
 ```
 
@@ -33,14 +33,28 @@ Do not expect `okf new` to update `index.md` or `log.md`. Add authored navigatio
 Use the narrowest view that answers the question:
 
 ```sh
-okf show tables/orders --frontmatter-only --format json
-okf show tables/orders --body-only
+okf meta get tables/orders --format json
+okf body get tables/orders
 okf meta get tables/orders generated.by --format json
 okf tag list --format json
 okf tag list tables --counts --format json
 ```
 
 Use `list` and `search` first when the exact concept is unknown. Use `tag list` to discover the bundle's tag vocabulary or inspect tag usage within a path. Do not guess a concept ID or tag when discovery can resolve it.
+
+## Replace a body through okf
+
+Use `okf body set` when the frontmatter must stay byte-for-byte unchanged or when the write must fail if the file changed after it was read. Save the body, edit the saved copy, then write it back with the `identity` read before editing:
+
+```sh
+okf body get tables/orders --format json   # note "identity"
+okf body get tables/orders > /tmp/orders-body.md
+# Edit /tmp/orders-body.md.
+okf body set tables/orders --from-file /tmp/orders-body.md --if-match <identity> --dry-run
+okf body set tables/orders --from-file /tmp/orders-body.md --if-match <identity> --format json
+```
+
+The command writes the supplied body exactly; it does not compose or reformat content. Review the `warnings` it reports, which are only the link and citation warnings the new body introduces. Writing back an unedited copy reports `"changed": false`.
 
 ## Change frontmatter narrowly
 

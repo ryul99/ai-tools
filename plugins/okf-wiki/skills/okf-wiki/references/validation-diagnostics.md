@@ -5,7 +5,7 @@
 - Use `okf validate [path]` for OKF structure, metadata shapes, stale state, path-valued fields, and cross-concept policy diagnostics.
 - Use `okf links check [path]` for broken or outside-bundle internal links.
 - Use `okf citations check [path]` for relationships between body footnotes and `sources[].id`.
-- Use `okf lifecycle report` to inventory stale or upcoming concepts without running the full validator.
+- Use `okf list --stale` or `okf list --due-before YYYY-MM-DD` to inventory stale or upcoming concepts without running the full validator.
 
 Prefer JSON when diagnosing or automating:
 

@@ -7,6 +7,7 @@
 - Validate an explicit or environment-provided root before relying on it. If it is invalid or unreadable, ask for a corrected path instead of saving a replacement.
 - Do not create a separate root-path state file or modify the user's environment or shell startup files.
 - Prefer `--format json` for agent interpretation and automation.
+- Mutating commands with `--format json` report `changed` (whether a file was, or with `--dry-run` would be, changed) and the target concept as `id`. `path` always means a file path. A `--dry-run` result has the same fields as the real run.
 - Use `--today YYYY-MM-DD` when a date-dependent result must be deterministic.
 - Concept IDs are bundle-relative POSIX paths without `.md`, such as `tables/orders`. Most concept arguments also accept an explicit `.md` path.
 - Treat `index.md` and `log.md` as reserved files, not concept IDs.
@@ -19,9 +20,11 @@ okf new <concept> --type <type> [--title <text>] [--description <text>]
   [--resource <value>] [--tag <tag>]... [--status draft|stable|deprecated]
   [--generated-by <actor>] [--dry-run]
 okf list [path] [filters]
-okf show <concept> [--frontmatter-only | --body-only]
-okf search <query> [--metadata-only] [--case-sensitive] [filters]
+okf show <concept>
+okf search <query> [--metadata-only] [--case-sensitive] [--limit <n>] [filters]
 ```
+
+`show` prints the whole concept; its JSON adds `identity`, the SHA-256 of the file. Read only the frontmatter with `okf meta get <concept>` and only the body with `okf body get <concept>`. `list` JSON records also include `stale_after` and `latest_verification`. `search --limit` keeps the first matches in concept ID order and notes omitted matches on stderr.
 
 The shared list and search filters are:
 
@@ -55,6 +58,16 @@ okf tag remove <concept> <tag>... [--dry-run]
 
 Use dotted metadata paths such as `generated.by`. Supply `--type` for values that could be parsed as a number, boolean, date, null, object, or array. Use `--type json` only for an object or array. Never unset or empty the required `type` field.
 
+## Read and replace bodies
+
+```text
+okf body get <concept>
+okf body set <concept> [--from-file <path>] [--if-match <sha256>]
+  [--warnings-as-errors] [--dry-run]
+```
+
+`body set` writes the body from `--from-file` or stdin exactly as supplied and keeps the frontmatter bytes unchanged. `--if-match` refuses the write when the file no longer has the `identity` that `body get` or `show` reported. The result lists link and citation warnings the new body introduces; `--warnings-as-errors` refuses such a write with exit code `1`.
+
 ## Manage provenance and lifecycle
 
 ```text
@@ -62,11 +75,12 @@ okf source list <concept>
 okf source add <concept> --resource <value> [source options] [--dry-run]
 okf source remove <concept> (--id <id> | --resource <value>) [--dry-run]
 okf verify <concept> --by <actor> [--at <ISO-8601-datetime>] [--dry-run]
-okf lifecycle set-status <concept> draft|stable|deprecated [--dry-run]
-okf lifecycle set-stale-after <concept> YYYY-MM-DD [--dry-run]
-okf lifecycle clear-stale-after <concept> [--dry-run]
-okf lifecycle report [--stale] [--due-before YYYY-MM-DD]
+okf lifecycle set <concept> status draft|stable|deprecated [--dry-run]
+okf lifecycle set <concept> stale_after YYYY-MM-DD [--dry-run]
+okf lifecycle unset <concept> status|stale_after [--dry-run]
 ```
+
+Report lifecycle state with `okf list --stale` or `okf list --due-before YYYY-MM-DD`.
 
 ## Inspect relationships and validate
 

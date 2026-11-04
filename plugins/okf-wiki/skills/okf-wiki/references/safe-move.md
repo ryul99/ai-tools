@@ -10,7 +10,7 @@ Follow this workflow completely for every concept move. Never use filesystem mov
 4. Generate a structured move plan without writing files.
 
 ```sh
-okf show a/item --frontmatter-only --format json
+okf meta get a/item --format json
 okf links backlinks a/item --format json
 okf links outgoing a/item --format json
 okf move a/item new/item --dry-run --format json
