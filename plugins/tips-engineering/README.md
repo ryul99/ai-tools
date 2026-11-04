@@ -20,3 +20,4 @@ claude plugin install tips-engineering@ryul99-ai-tools
 ## Included skills
 
 - `github-searching`: Tips for effectively searching GitHub issues and pull requests.
+- `ui-principles`: Principles for designing and reviewing any user interface, from applications to HTML reports and slide decks.

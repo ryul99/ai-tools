@@ -1,6 +1,6 @@
 {
   "name": "tips-engineering",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "A growing collection of lazily loaded tips for software engineering workflows.",
   "author": {
     "name": "ryul99",
@@ -8,6 +8,6 @@
   },
   "homepage": "https://github.com/ryul99/ai-tools",
   "repository": "https://github.com/ryul99/ai-tools",
-  "keywords": ["tips", "engineering", "github", "pull-requests", "issues"],
+  "keywords": ["tips", "engineering", "github", "pull-requests", "issues", "ui", "design"],
   "skills": "./skills/"
 }
