@@ -45,7 +45,7 @@
     {
       "name": "okf-wiki-handoff-mod",
       "source": "./plugins/okf-wiki-handoff-mod",
-      "description": "Experimental Claude Code mod that replaces context compaction with an OKF handoff note and recallable archived originals"
+      "description": "Experimental Claude Code mod with Codex-style context management: a kept OKF handoff note, reminders before the context runs out, and fresh context windows that hold only the note"
     },
     {
       "name": "tips-korean",

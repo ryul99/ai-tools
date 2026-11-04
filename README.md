@@ -13,7 +13,7 @@ A small collection of plugins for Codex and Claude Code.
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
 | `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
 | `okf-wiki-autosave-mod` | No | Yes (mod) | Experimental mod version of `okf-wiki-autosave`. |
-| `okf-wiki-handoff-mod` | No | Yes (mod) | Experimental mod that replaces context compaction with an OKF handoff note. |
+| `okf-wiki-handoff-mod` | No | Yes (mod) | Experimental mod with Codex-style context management around an OKF handoff note. |
 | `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
 | `tips-engineering` | Yes | Yes | Provides lazily loaded tips for software engineering workflows. |
 
@@ -58,8 +58,10 @@ claude plugin install okf-wiki-autosave-mod@ryul99-ai-tools
 
 The handoff mod is an alternative to `okf-wiki-handoff`, not a replacement for
 it. Where the hook plugin keeps a note current and shows it next to the CLI's
-compaction summary, the mod replaces Claude Code's context compaction with a
-handoff note; see the [hook plugin README](plugins/okf-wiki-handoff/README.md)
+compaction summary, the mod follows Codex's experimental context management:
+it reminds the model before the context runs out and lets it start a fresh
+context window that holds only the note, and it replaces compactions with the
+note too; see the [hook plugin README](plugins/okf-wiki-handoff/README.md)
 and the [mod README](plugins/okf-wiki-handoff-mod/README.md). Install only one
 of the two:
 

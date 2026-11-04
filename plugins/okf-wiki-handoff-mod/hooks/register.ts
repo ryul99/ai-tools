@@ -1,33 +1,90 @@
-import type { EngineInterface, Register, SessionCompactInput, SessionCompactResult } from 'claude-code'
+import type {
+  EngineInterface,
+  Register,
+  SessionCompactInput,
+  SessionCompactResult,
+  ToolCallResult,
+} from 'claude-code'
 
 import {
+  CONTINUE_PROMPT,
   HANDOFF_DIR,
   HANDOFF_TAG,
   HANDOFF_TYPE,
-  RECALL_TOOL,
+  PLUGIN,
+  RESET_INSTRUCTIONS,
+  SECTION_ID,
+  SLUG_PATTERN,
+  TOOL,
+  guidanceSection,
   handoffMessage,
+  isRecord,
   keptTail,
   latestPrompt,
   noteBody,
   parsePlan,
+  periodicReminder,
   plannerPrompt,
   projectKey,
   recentToolResults,
+  remainingText,
   renderEntries,
+  splitArchive,
+  toolId,
+  urgentReminder,
 } from './handoff'
-import type { HandoffEntry, Segment } from './handoff'
+import type { RecentNote, Segment } from './handoff'
 
 const OKF_TIMEOUT_MS = 30_000
 const RECALL_CHUNK_LINES = 200
 const RECALL_MAX_CHARS = 30_000
-const GENERATED_BY = 'process:okf-wiki-handoff-mod'
-const DESCRIPTION = 'Handoff note that replaced a compacted Claude Code conversation.'
+const GENERATED_BY = `process:${PLUGIN}`
+const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context resets and compaction.'
 const BUNDLE_NAME = 'okf-handoff'
+const MAX_RECENT_NOTES = 5
+const DEFAULT_REMIND_TOKENS = 25_000
+const DEFAULT_MARGIN_PERCENT = 5
+/** A note updated within this many tokens of work counts as current. */
+const FRESH_TOKENS = 10_000
+const RESET_ATTEMPTS = 50
+const RESET_RETRY_MS = 200
 
 /** The handoff bundle and this project's folder of handoff concepts in it. */
 type Place = { root: string; folder: string }
 
-type SessionRecord = { slug?: string }
+type SessionRecord = {
+  /** The note's slug; sessions before 0.2.0 chose one, later ones use the session id. */
+  slug?: string
+  /** The context size when the note last changed; absent until the next reading. */
+  noteTokens?: number
+  remindedTokens?: number
+  /** The note version (`writes`) the last urgent reminder was given for. */
+  urgedWrites?: number
+  writes?: number
+  isResetPending?: boolean
+  window?: number
+}
+
+type Limits = { window: number; compactAt: number | undefined }
+
+const NOTE_SCHEMA = {
+  type: 'object',
+  properties: {
+    handoff: {
+      type: 'string',
+      description: "A handoff slug of this project, from the session's list; omit it for this session's own note.",
+    },
+  },
+}
+
+const WRITE_SCHEMA = {
+  type: 'object',
+  properties: {
+    body: { type: 'string', description: 'The whole note in Markdown.' },
+    title: { type: 'string', description: 'A short title for the task; optional.' },
+  },
+  required: ['body'],
+}
 
 const RECALL_SCHEMA = {
   type: 'object',
@@ -35,7 +92,7 @@ const RECALL_SCHEMA = {
     segment: { type: 'integer', minimum: 1, description: 'The archived segment number.' },
     handoff: {
       type: 'string',
-      description: "The handoff slug in this project; defaults to this session's handoff.",
+      description: "The handoff slug in this project; defaults to this session's note.",
     },
     from_line: {
       type: 'integer',
@@ -46,8 +103,36 @@ const RECALL_SCHEMA = {
   required: ['segment'],
 }
 
-const RECALL_DESCRIPTION =
-  'Read the original messages of a conversation segment that an okf-wiki handoff replaced. Use it when the handoff note lacks a detail you need, such as an exact command, error message or file content.'
+const TOOLS = [
+  {
+    name: TOOL.read,
+    description: "Read this session's handoff note, or another handoff note of this project by its slug.",
+    inputSchema: NOTE_SCHEMA,
+  },
+  {
+    name: TOOL.write,
+    description:
+      "Replace this session's handoff note, creating it when it does not exist. Pass the whole note with the sections # Goal, # State, # Decisions and constraints, # Next steps and # Open questions; the plugin keeps the archived segments.",
+    inputSchema: WRITE_SCHEMA,
+  },
+  {
+    name: TOOL.remaining,
+    description: 'Report how much of the context window is in use and how many tokens remain before automatic compaction.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: TOOL.newContext,
+    description:
+      'Start a fresh context window when this turn ends: the conversation is replaced by the handoff note and the work continues on its own. Save the note first. Does not touch files or other environment state.',
+    inputSchema: { type: 'object', properties: {} },
+  },
+  {
+    name: TOOL.recall,
+    description:
+      'Read the original messages of a conversation segment that a context reset or compaction replaced. Use it when the handoff note lacks a detail you need, such as an exact command, error message or file content.',
+    inputSchema: RECALL_SCHEMA,
+  },
+]
 
 function errorText(error: unknown): string {
   return error instanceof Error ? error.message : String(error)
@@ -90,28 +175,31 @@ async function handoffPlace($: EngineInterface, isCreating: boolean): Promise<Pl
   return { root, folder: `${HANDOFF_DIR}/${projectKey(await $.session.root())}` }
 }
 
-async function knownHandoffs($: EngineInterface, place: Place): Promise<HandoffEntry[]> {
-  if (!(await $.fs.exists(`${place.root}/${place.folder}`))) {
-    return []
-  }
-  const records = await okf($, ['--root', place.root, 'list', place.folder, '--tag', HANDOFF_TAG])
-  if (!Array.isArray(records)) {
-    return []
-  }
-  const prefix = `${place.folder}/`
+async function sessionKey($: EngineInterface): Promise<string> {
+  return `session:${await $.session.id()}`
+}
 
-  return records.flatMap(record =>
-    typeof record?.id === 'string' && record.id.startsWith(prefix)
-      ? [{ slug: record.id.slice(prefix.length), title: String(record.title ?? '') }]
-      : [],
-  )
+async function sessionRecord($: EngineInterface): Promise<SessionRecord> {
+  const stored = await $.store.get(await sessionKey($))
+
+  return isRecord(stored) ? (stored as SessionRecord) : {}
+}
+
+async function saveRecord($: EngineInterface, record: SessionRecord): Promise<void> {
+  await $.store.set(await sessionKey($), record)
+}
+
+async function noteConcept($: EngineInterface, place: Place, record: SessionRecord): Promise<string> {
+  const slug = record.slug ?? (await $.session.id()).toLowerCase().replace(/[^a-z0-9-]/g, '-')
+
+  return `${place.folder}/${slug}`
 }
 
 function isSegment(value: unknown): value is Segment {
-  if (typeof value !== 'object' || value === null) {
+  if (!isRecord(value)) {
     return false
   }
-  const { at, transcript, from, to } = value as Record<string, unknown>
+  const { at, transcript, from, to } = value
 
   return (
     typeof at === 'string' &&
@@ -133,13 +221,27 @@ async function segmentsOf($: EngineInterface, place: Place, concept: string): Pr
   return Array.isArray(stored) ? stored.filter(isSegment) : []
 }
 
+async function readNote(
+  $: EngineInterface,
+  place: Place,
+  concept: string,
+): Promise<{ body: string; identity: string } | undefined> {
+  if (!(await $.fs.exists(`${place.root}/${concept}.md`))) {
+    return undefined
+  }
+  const current = await okf($, ['--root', place.root, 'body', 'get', concept])
+  if (!isRecord(current) || typeof current.identity !== 'string') {
+    throw new Error(`okf body get ${concept} returned no identity`)
+  }
+
+  return { body: typeof current.body === 'string' ? current.body : '', identity: current.identity }
+}
+
 async function writeNote(
   $: EngineInterface,
   place: Place,
   concept: string,
-  title: string,
-  body: string,
-  segments: readonly Segment[],
+  options: { title?: string; handoff: string; segments: readonly Segment[] },
 ): Promise<void> {
   const root = ['--root', place.root]
   if (!(await $.fs.exists(`${place.root}/${concept}.md`))) {
@@ -150,7 +252,7 @@ async function writeNote(
       '--type',
       HANDOFF_TYPE,
       '--title',
-      title,
+      options.title ?? `Handoff ${new Date().toISOString().slice(0, 10)}`,
       '--description',
       DESCRIPTION,
       '--tag',
@@ -158,19 +260,53 @@ async function writeNote(
       '--generated-by',
       GENERATED_BY,
     ])
+  } else if (options.title !== undefined) {
+    await okf($, [...root, 'meta', 'set', concept, 'title', options.title])
   }
-  if (segments.length > 0) {
-    await okf($, [...root, 'meta', 'set', concept, 'segments', JSON.stringify(segments), '--type', 'json'])
+  if (options.segments.length > 0) {
+    await okf($, [...root, 'meta', 'set', concept, 'segments', JSON.stringify(options.segments), '--type', 'json'])
   }
-  const current = await okf($, [...root, 'body', 'get', concept])
-  const identity =
-    typeof current === 'object' && current !== null && 'identity' in current
-      ? String(current.identity)
-      : undefined
-  if (identity === undefined) {
-    throw new Error(`okf body get ${concept} returned no identity`)
+  const current = await readNote($, place, concept)
+  if (current === undefined) {
+    throw new Error(`${concept} disappeared while it was written`)
   }
-  await okf($, [...root, 'body', 'set', concept, '--if-match', identity], body)
+  await okf(
+    $,
+    [...root, 'body', 'set', concept, '--if-match', current.identity],
+    noteBody(options.handoff, options.segments),
+  )
+}
+
+async function recentNotes($: EngineInterface, place: Place, exclude: string): Promise<RecentNote[]> {
+  if (!(await $.fs.exists(`${place.root}/${place.folder}`))) {
+    return []
+  }
+  const records = await okf($, ['--root', place.root, 'list', place.folder, '--tag', HANDOFF_TAG])
+  if (!Array.isArray(records)) {
+    return []
+  }
+  const notes: (RecentNote & { mtimeMs: number })[] = []
+  for (const record of records) {
+    const concept = isRecord(record) && typeof record.id === 'string' ? record.id : undefined
+    if (concept === undefined || !concept.startsWith(`${place.folder}/`) || concept === exclude) {
+      continue
+    }
+    const stat = await $.fs.stat(`${place.root}/${concept}.md`).catch(() => undefined)
+    if (stat === undefined) {
+      continue
+    }
+    notes.push({
+      concept,
+      title: isRecord(record) ? String(record.title ?? '') : '',
+      modified: `${new Date(stat.mtimeMs).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
+      mtimeMs: stat.mtimeMs,
+    })
+  }
+
+  return notes
+    .sort((left, right) => right.mtimeMs - left.mtimeMs)
+    .slice(0, MAX_RECENT_NOTES)
+    .map(({ concept, title, modified }) => ({ concept, title, modified }))
 }
 
 async function lineCount($: EngineInterface, path: string): Promise<number | undefined> {
@@ -207,88 +343,250 @@ async function transcriptPath(
   return undefined
 }
 
-async function sessionKey($: EngineInterface): Promise<string> {
-  return `session:${await $.session.id()}`
+function positiveNumber(raw: string | undefined, fallback: number): number {
+  const match = /^\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmM]?)\s*$/.exec(raw ?? '')
+  if (match === null) {
+    return fallback
+  }
+  const scale = { '': 1, k: 1_000, m: 1_000_000 }[match[2]?.toLowerCase() ?? ''] ?? 1
+  const value = Number(match[1]) * scale
+
+  return value > 0 ? value : fallback
 }
 
-async function sessionRecord($: EngineInterface): Promise<SessionRecord> {
-  const stored = await $.store.get(await sessionKey($))
+/** What the hooks share; a reload starts it over, while `$.store` keeps the session record. */
+const runtime: {
+  transcript: string | undefined
+  limits: Limits | undefined
+  section: string | undefined
+  remindTokens: number
+  marginPercent: number
+} = {
+  transcript: undefined,
+  limits: undefined,
+  section: undefined,
+  remindTokens: DEFAULT_REMIND_TOKENS,
+  marginPercent: DEFAULT_MARGIN_PERCENT,
+}
 
-  return typeof stored === 'object' && stored !== null ? (stored as SessionRecord) : {}
+async function refreshLimits($: EngineInterface): Promise<Limits> {
+  const { context } = await $.session.usage({ breakdown: 'summary' })
+  const breakdown = context.breakdown
+  runtime.limits = {
+    window: context.window,
+    compactAt: breakdown?.isAutoCompactEnabled === true ? breakdown.autoCompactThreshold : undefined,
+  }
+
+  return runtime.limits
+}
+
+/** The reminder due now, if any: an urgent one near compaction, else a periodic one. */
+async function dueReminder($: EngineInterface): Promise<string | undefined> {
+  const { context } = await $.session.usage()
+  const tokens = context.tokens
+  if (tokens === undefined) {
+    return undefined
+  }
+  const record = await sessionRecord($)
+  if (record.noteTokens === undefined) {
+    // A fresh or just-compacted context starts even with its note.
+    await saveRecord($, { ...record, noteTokens: tokens })
+
+    return undefined
+  }
+  const since = tokens - record.noteTokens
+  const current = runtime.limits?.window === context.window ? runtime.limits : await refreshLimits($)
+  const writes = record.writes ?? 0
+  let text: string | undefined
+  if (
+    current.compactAt !== undefined &&
+    tokens >= current.compactAt - (context.window * runtime.marginPercent) / 100 &&
+    record.urgedWrites !== writes
+  ) {
+    record.urgedWrites = writes
+    text = urgentReminder({
+      tokens,
+      compactAt: current.compactAt,
+      isNoteCurrent: record.writes !== undefined && since < FRESH_TOKENS,
+    })
+  } else if (
+    since >= runtime.remindTokens &&
+    (record.remindedTokens === undefined || tokens - record.remindedTokens >= runtime.remindTokens)
+  ) {
+    record.remindedTokens = tokens
+    text = periodicReminder(since)
+  }
+  if (text !== undefined) {
+    await saveRecord($, record)
+  }
+
+  return text
 }
 
 async function replaceWithHandoff(
   $: EngineInterface,
   e: SessionCompactInput,
-  transcript: string | undefined,
+  isReset: boolean,
 ): Promise<SessionCompactResult> {
   const place = await handoffPlace($, true)
   if (place === undefined) {
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const reply = await $.model.fork({
-    prompt: plannerPrompt({
-      currentSlug: record.slug,
-      known: await knownHandoffs($, place),
-      instructions: e.instructions,
-      recentResults: recentToolResults(e.messages),
-    }),
-  })
-  if (!reply.isAnswered) {
-    throw new Error(`the handoff request ended with ${reply.reason}`)
-  }
-  const plan = parsePlan(reply.text)
-  if (plan === undefined) {
-    throw new Error('the handoff reply was not a handoff plan')
-  }
-  const slug = record.slug ?? plan.slug
-  const concept = `${place.folder}/${slug}`
+  const concept = await noteConcept($, place, record)
+  const note = await readNote($, place, concept)
+  const current = note === undefined ? '' : splitArchive(note.body)
+  const { context } = await $.session.usage()
+  const since =
+    context.tokens !== undefined && record.noteTokens !== undefined
+      ? context.tokens - record.noteTokens
+      : Number.POSITIVE_INFINITY
 
-  const segments = await segmentsOf($, place, concept)
-  const lastLine = transcript === undefined ? undefined : await lineCount($, transcript)
-  if (transcript !== undefined && lastLine !== undefined) {
-    const archived = segments
-      .filter(segment => segment.transcript === transcript)
-      .reduce((highest, segment) => Math.max(highest, segment.to), 0)
-    if (lastLine > archived) {
-      segments.push({ at: new Date().toISOString(), transcript, from: archived + 1, to: lastLine })
+  let handoff = current
+  let title: string | undefined
+  if (current === '' || since >= FRESH_TOKENS) {
+    const reply = await $.model.fork({
+      prompt: plannerPrompt({
+        concept,
+        current,
+        instructions: isReset ? undefined : e.instructions,
+        recentResults: recentToolResults(e.messages),
+      }),
+    })
+    const plan = reply.isAnswered ? parsePlan(reply.text) : undefined
+    if (plan !== undefined) {
+      handoff = plan.handoff
+      title = plan.title
+    } else if (current === '') {
+      throw new Error(reply.isAnswered ? 'the handoff reply was not a handoff plan' : `the handoff request ended with ${reply.reason}`)
     }
   }
 
-  await writeNote($, place, concept, plan.title, noteBody(plan.handoff, segments), segments)
-  await $.store.set(await sessionKey($), { slug })
+  const segments = await segmentsOf($, place, concept)
+  const path = await transcriptPath($, runtime.transcript)
+  const lastLine = path === undefined ? undefined : await lineCount($, path)
+  if (path !== undefined && lastLine !== undefined) {
+    const archived = segments
+      .filter(segment => segment.transcript === path)
+      .reduce((highest, segment) => Math.max(highest, segment.to), 0)
+    if (lastLine > archived) {
+      segments.push({ at: new Date().toISOString(), transcript: path, from: archived + 1, to: lastLine })
+    }
+  }
 
-  const tail = keptTail(e.messages)
+  await writeNote($, place, concept, { title, handoff, segments })
+  const window = (record.window ?? 1) + 1
+  await saveRecord($, {
+    slug: record.slug,
+    writes: (record.writes ?? 0) + (title === undefined ? 0 : 1),
+    window,
+  })
+
+  const tail = isReset ? [] : keptTail(e.messages)
   const text = handoffMessage({
     root: place.root,
     concept,
-    handoff: plan.handoff,
-    prompt: tail.length === 0 ? latestPrompt(e.messages) : undefined,
+    handoff,
+    prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
     segments: segments.length,
+    window,
+    isReset,
   })
-  $.ui.toast(`okf handoff: replaced the conversation with ${concept}`)
+  $.ui.toast(`okf handoff: context window #${window} starts from ${concept}`)
 
   return { messages: [{ role: 'user', text, toolUses: [] }, ...tail] }
 }
 
-async function recall($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+/** Resets the context once the turn that asked for it has let go of the session. */
+async function resetContext($: EngineInterface): Promise<void> {
+  for (let attempt = 0; attempt < RESET_ATTEMPTS; attempt += 1) {
+    try {
+      await $.command.run({ command: 'compact', args: RESET_INSTRUCTIONS })
+    } catch {
+      // The command is refused while the turn that asked for the reset still runs.
+      await $.clock.sleep(RESET_RETRY_MS)
+      continue
+    }
+    if ((await sessionRecord($)).isResetPending === true) {
+      // The compaction hook clears the flag; still set, the conversation was not replaced.
+      $.ui.toast('okf handoff: new_context did not replace the conversation')
+      await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
+
+      return
+    }
+    await $.prompt.submit({ text: CONTINUE_PROMPT })
+
+    return
+  }
+  $.ui.toast('okf handoff: new_context could not start a fresh context window')
+  await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
+}
+
+async function readTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  const place = await handoffPlace($, false)
+  if (place === undefined) {
+    return 'No handoff note has been written on this machine yet.'
+  }
+  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
+  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
+    return 'Pass "handoff" as a slug from the list of recent notes.'
+  }
+  const concept = slug === undefined ? await noteConcept($, place, await sessionRecord($)) : `${place.folder}/${slug}`
+  const note = await readNote($, place, concept)
+  if (note === undefined) {
+    return `${concept} has not been written yet.`
+  }
+  const segments = await segmentsOf($, place, concept)
+  const footer = segments.length === 0 ? '' : `\n\n[${segments.length} archived segments: read them with recall]`
+
+  return `${concept}\n\n${splitArchive(note.body) || '(empty)'}${footer}`
+}
+
+async function writeTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  const body = typeof input.body === 'string' ? splitArchive(input.body) : ''
+  if (body === '') {
+    return 'Pass "body" as the whole note in Markdown.'
+  }
+  const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
+  const place = await handoffPlace($, true)
+  if (place === undefined) {
+    throw new Error('the handoff bundle could not be created')
+  }
+  const record = await sessionRecord($)
+  const concept = await noteConcept($, place, record)
+  await writeNote($, place, concept, { title, handoff: body, segments: await segmentsOf($, place, concept) })
+  const { context } = await $.session.usage()
+  await saveRecord($, {
+    ...record,
+    writes: (record.writes ?? 0) + 1,
+    noteTokens: context.tokens,
+    remindedTokens: undefined,
+  })
+
+  return `Saved ${concept}.`
+}
+
+async function remainingTool($: EngineInterface): Promise<string> {
+  const current = await refreshLimits($)
+  const { context } = await $.session.usage()
+
+  return remainingText({ tokens: context.tokens, window: current.window, compactAt: current.compactAt })
+}
+
+async function recallTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const number = input.segment
   if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
     return 'Pass "segment" as a positive integer.'
   }
   const place = await handoffPlace($, false)
   if (place === undefined) {
-    return 'No handoff has been written on this machine yet.'
+    return 'No handoff note has been written on this machine yet.'
   }
-  const slug =
-    typeof input.handoff === 'string' && input.handoff !== ''
-      ? input.handoff
-      : (await sessionRecord($)).slug
-  if (slug === undefined) {
-    return 'This session has no handoff yet; pass "handoff" with the handoff slug.'
+  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
+  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
+    return 'Pass "handoff" as a slug from the list of recent notes.'
   }
-  const concept = `${place.folder}/${slug}`
+  const concept = slug === undefined ? await noteConcept($, place, await sessionRecord($)) : `${place.folder}/${slug}`
   const segments = await segmentsOf($, place, concept)
   const segment = segments[number - 1]
   if (segment === undefined) {
@@ -318,54 +616,159 @@ async function recall($: EngineInterface, input: Record<string, unknown>): Promi
 }
 
 export const register: Register = on => {
-  let transcript: string | undefined
-
   on('session.start', async ($, e, next) => {
-    await $.tool.register({
-      name: 'recall',
-      description: RECALL_DESCRIPTION,
-      inputSchema: RECALL_SCHEMA,
-      isDeferred: false,
-    })
+    for (const tool of TOOLS) {
+      await $.tool.register({ ...tool, isDeferred: false })
+    }
+    runtime.remindTokens = positiveNumber(await $.env.get('OKF_HANDOFF_REMIND_TOKENS'), DEFAULT_REMIND_TOKENS)
+    const margin = positiveNumber(await $.env.get('OKF_HANDOFF_MARGIN_PERCENT'), DEFAULT_MARGIN_PERCENT)
+    runtime.marginPercent = margin < 100 ? margin : DEFAULT_MARGIN_PERCENT
+    try {
+      const record = await sessionRecord($)
+      if (record.isResetPending === true) {
+        // A reset asked for by a process that exited before its turn ended is not carried over.
+        await saveRecord($, { ...record, isResetPending: false })
+      }
+      const place = await handoffPlace($, true)
+      if (place !== undefined) {
+        const concept = await noteConcept($, place, record)
+        runtime.section = guidanceSection({ concept, root: place.root, recent: await recentNotes($, place, concept) })
+      }
+    } catch (error) {
+      $.ui.toast(`okf handoff: no handoff note this session: ${errorText(error)}`)
+    }
 
     return next(e)
+  })
+
+  on('prompt.compose', async ($, e, next) => {
+    const result = await next(e)
+
+    return runtime.section === undefined
+      ? result
+      : { sections: [...result.sections, { id: SECTION_ID, text: runtime.section, scope: 'session' as const }] }
   })
 
   // Classic events carry the transcript path, which the archive points into.
   on('classic.SessionStart', ($, e, next) => {
-    transcript = e.transcript_path || transcript
+    runtime.transcript = e.transcript_path || runtime.transcript
 
     return next(e)
   })
   on('classic.UserPromptSubmit', ($, e, next) => {
-    transcript = e.transcript_path || transcript
+    runtime.transcript = e.transcript_path || runtime.transcript
 
     return next(e)
+  })
+
+  on('session.measure', async ($, e, next) => {
+    if (e.changed.includes('context') && runtime.limits?.window !== e.context.window) {
+      await refreshLimits($).catch(() => undefined)
+    }
+
+    return next(e)
+  })
+
+  on('prompt.submit', async ($, e, next) => {
+    if (e.command !== undefined || (e.origin.kind === 'plugin' && e.origin.name === PLUGIN)) {
+      return next(e)
+    }
+    const text = await dueReminder($).catch(() => undefined)
+
+    return next(text === undefined ? e : { ...e, context: [...(e.context ?? []), text] })
+  })
+
+  // Reminders ride on the results of the main agent's other tools, as a PostToolUse hook's context does.
+  on('tool.call', async ($, e, next) => {
+    const result: ToolCallResult = await next(e)
+    if (e.agentId !== undefined || e.tool.startsWith(toolId('')) || result.deny !== undefined) {
+      return result
+    }
+    const text = await dueReminder($).catch(() => undefined)
+
+    return text === undefined ? result : { ...result, context: [...(result.context ?? []), text] }
+  })
+
+  const mainOnly = 'Only the main agent keeps the handoff note.'
+  on('tool.call', { tool: toolId(TOOL.read) }, async ($, e) => ({
+    result: await readTool($, e as unknown as Record<string, unknown>).catch(
+      (error: unknown) => `handoff_read failed: ${errorText(error)}`,
+    ),
+  }))
+  on('tool.call', { tool: toolId(TOOL.write) }, async ($, e) =>
+    e.agentId !== undefined
+      ? { deny: mainOnly }
+      : {
+          result: await writeTool($, e as unknown as Record<string, unknown>).catch(
+            (error: unknown) => `handoff_write failed: ${errorText(error)}`,
+          ),
+        },
+  )
+  on('tool.call', { tool: toolId(TOOL.remaining) }, async $ => ({
+    result: await remainingTool($).catch((error: unknown) => `context_remaining failed: ${errorText(error)}`),
+  }))
+  on('tool.call', { tool: toolId(TOOL.newContext) }, async ($, e) => {
+    if (e.agentId !== undefined) {
+      return { deny: mainOnly }
+    }
+    await saveRecord($, { ...(await sessionRecord($)), isResetPending: true })
+
+    return {
+      result:
+        'A fresh context window starts when this turn ends: the conversation is replaced by the handoff note, and the work continues on its own. If the note is behind the work, update it with handoff_write first. Then end the turn with a one-line status.',
+    }
+  })
+  on('tool.call', { tool: toolId(TOOL.recall) }, async ($, e) => ({
+    result: await recallTool($, e as unknown as Record<string, unknown>).catch(
+      (error: unknown) => `recall failed: ${errorText(error)}`,
+    ),
+  }))
+
+  on('turn.complete', async ($, e, next) => {
+    const result = await next(e)
+    if (e.agentId !== undefined) {
+      return result
+    }
+    const record = await sessionRecord($)
+    if (record.isResetPending === true) {
+      if (e.isAborted) {
+        await saveRecord($, { ...record, isResetPending: false })
+        $.ui.toast('okf handoff: the turn was interrupted, so new_context was cancelled')
+      } else {
+        // A timer outlives this dispatch, and the session only compacts between turns.
+        $.clock.after(0, () => {
+          void resetContext($)
+        })
+      }
+    }
+
+    return result
   })
 
   on('session.compact', async ($, e, next) => {
     if (e.agentId !== undefined) {
       return next(e)
     }
-    // The handoff is written when the compaction runs, so a precomputed summary would be wasted.
+    // The note is written when the compaction runs, so a precomputed summary would be wasted.
     if (e.trigger === 'precompute') {
-      return { skip: 'okf-wiki-handoff-mod writes a handoff when the compaction runs' }
+      return { skip: `${PLUGIN} writes a handoff note when the compaction runs` }
     }
+    // The plugin's own `$.session.compact` would skip this hook as a re-entry, so a reset arrives
+    // as the `/compact` command the plugin ran, marked by its instructions.
+    const isReset =
+      e.instructions?.trim() === RESET_INSTRUCTIONS && (await sessionRecord($)).isResetPending === true
     $.ui.status('okf handoff: writing')
     try {
-      return await replaceWithHandoff($, e, await transcriptPath($, transcript))
+      return await replaceWithHandoff($, e, isReset)
     } catch (error) {
       $.ui.toast(`okf handoff failed, compacting as usual: ${errorText(error)}`)
+      if (isReset) {
+        await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
+      }
 
       return next(e)
     } finally {
       $.ui.status(undefined)
     }
   })
-
-  on('tool.call', { tool: RECALL_TOOL }, async ($, e) => ({
-    result: await recall($, e as unknown as Record<string, unknown>).catch(
-      (error: unknown) => `recall failed: ${errorText(error)}`,
-    ),
-  }))
 }
