@@ -69,6 +69,11 @@ of the two:
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
 ```
 
+The hook plugins `english-lecturer`, `okf-wiki-autosave`, and
+`okf-wiki-handoff` run their TypeScript with Node.js 22.18 or newer. Each one
+shares its core with its mod version: the mod's `hooks/core` links to the hook
+plugin's `lib/core/`, so a change there ships in both and bumps both versions.
+
 Install only the plugins you need. `okf-wiki` never installs a hook. Install
 `okf-wiki-autosave` separately when automatic updates are wanted. In Claude
 Code it declares `okf-wiki` as a dependency, so installing the autosave plugin
