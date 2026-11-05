@@ -45,6 +45,8 @@ import {
   agentRemainingText,
   guidanceSection,
   handoffMessage,
+  heldTurnNotice,
+  heldTurnText,
   keptTail,
   latestPrompt,
   parsePlan,
@@ -79,6 +81,8 @@ type SessionRecord = {
   urgedWrites?: number
   writes?: number
   isResetPending?: boolean
+  /** The turn a Stop hook kept going after `new_context`, in which no fresh window can start. */
+  heldTurnId?: string
   window?: number
 }
 
@@ -341,11 +345,32 @@ const runtime: {
   guidance: { sessionId: string; text: string } | undefined
   remindTokens: number
   marginPercent: number
+  /** The main loop's running turn, which `session.append` does not name. */
+  turnId: string | undefined
 } = {
   limits: undefined,
   guidance: undefined,
   remindTokens: DEFAULT_REMIND_TOKENS,
   marginPercent: DEFAULT_MARGIN_PERCENT,
+  turnId: undefined,
+}
+
+function isTurnHeld(record: SessionRecord): boolean {
+  return record.heldTurnId !== undefined && record.heldTurnId === runtime.turnId
+}
+
+/** The engine's row for a Stop hook's reason to keep the turn going, whatever hook gave it (a command, `/goal`). */
+function isStopFeedback(message: { type: string; isMeta?: true; content: readonly unknown[] }): boolean {
+  const first = message.content[0]
+
+  return (
+    message.type === 'user' &&
+    message.isMeta === true &&
+    isRecord(first) &&
+    first.type === 'text' &&
+    typeof first.text === 'string' &&
+    first.text.startsWith('Stop hook feedback:')
+  )
 }
 
 async function refreshLimits($: EngineInterface): Promise<Limits> {
@@ -408,6 +433,7 @@ async function dueReminder($: EngineInterface): Promise<string | undefined> {
       tokens,
       compactAt: current.compactAt,
       isNoteCurrent: record.writes !== undefined && since < FRESH_TOKENS,
+      isTurnHeld: isTurnHeld(record),
     })
   } else if (
     since >= runtime.remindTokens &&
@@ -509,6 +535,8 @@ async function replaceWithHandoff(
   await saveRecord($, {
     writes: (record.writes ?? 0) + (title === undefined ? 0 : 1),
     window,
+    // A compaction inside a held turn leaves it held: its end still does not come.
+    heldTurnId: record.heldTurnId,
   })
 
   const tail = isReset ? [] : keptTail(e.messages)
@@ -564,6 +592,10 @@ async function noticeAgentNote(
 /** Resets the context once the turn that asked for it has let go of the session. */
 async function resetContext($: EngineInterface): Promise<void> {
   for (let attempt = 0; attempt < RESET_ATTEMPTS; attempt += 1) {
+    if ((await sessionRecord($)).isResetPending !== true) {
+      // A compaction or a held turn took the request back.
+      return
+    }
     try {
       await $.command.run({ command: 'compact', args: RESET_INSTRUCTIONS })
     } catch {
@@ -803,7 +835,11 @@ export const register: Register = on => {
         deny: 'A subagent cannot start a fresh context window. Keep your handoff note current instead: when your context fills up, Claude Code compacts it as usual and you are told the note is there.',
       }
     }
-    await saveRecord($, { ...(await sessionRecord($)), isResetPending: true })
+    const record = await sessionRecord($)
+    if (isTurnHeld(record)) {
+      return { result: heldTurnText() }
+    }
+    await saveRecord($, { ...record, isResetPending: true })
 
     return {
       result:
@@ -820,12 +856,45 @@ export const register: Register = on => {
     result: await historyResult($, TOOL.historyRead, e),
   }))
 
+  on('turn.start', async ($, e, next) => {
+    if (e.agentId === undefined) {
+      runtime.turnId = e.turnId
+    }
+
+    return next(e)
+  })
+
+  // A Stop hook that keeps the turn going leaves new_context waiting for an end that does not come.
+  on('session.append', { door: 'note' }, async ($, e, next) => {
+    if (e.agentId !== undefined || runtime.turnId === undefined || !isStopFeedback(e.message)) {
+      return next(e)
+    }
+    const record = await sessionRecord($).catch(() => undefined)
+    if (record?.isResetPending !== true) {
+      return next(e)
+    }
+    await saveRecord($, { ...record, isResetPending: false, heldTurnId: runtime.turnId })
+    const content = [...e.message.content]
+    const last = content.findLastIndex(block => block.type === 'text')
+    const block = content[last]
+    if (block === undefined || block.type !== 'text') {
+      return next(e)
+    }
+    content[last] = { ...block, text: `${block.text}\n\n${heldTurnNotice()}` }
+
+    return next({ ...e, message: { ...e.message, content } })
+  })
+
   on('turn.complete', async ($, e, next) => {
     const result = await next(e)
     if (e.agentId !== undefined) {
       return result
     }
-    const record = await sessionRecord($)
+    let record = await sessionRecord($)
+    if (record.heldTurnId !== undefined) {
+      record = { ...record, heldTurnId: undefined }
+      await saveRecord($, record)
+    }
     if (record.isResetPending === true) {
       if (e.isAborted) {
         await saveRecord($, { ...record, isResetPending: false })

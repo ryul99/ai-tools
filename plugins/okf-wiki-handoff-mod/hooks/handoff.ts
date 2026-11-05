@@ -62,7 +62,7 @@ This session keeps a handoff note, the OKF concept \`${options.concept}\` in the
 
 - Take notes while you work, in the language of the conversation. Add to the note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step, a new rule from the person. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. ${NOTE_CONTENT}
 - \`${toolId(TOOL.remaining)}\` tells how many tokens remain before automatic compaction; plan long steps against it.
-- When a reminder says the context is nearly exhausted, save the note, call \`${toolId(TOOL.newContext)}\`, and end the turn with a one-line status. When the turn ends, the conversation is replaced by the note and the work continues in a fresh context window on its own. You may also do this at a natural checkpoint once most of the context is used.
+- When a reminder says the context is nearly exhausted, save the note, call \`${toolId(TOOL.newContext)}\`, and end the turn with a one-line status. When the turn ends, the conversation is replaced by the note and the work continues in a fresh context window on its own. You may also do this at a natural checkpoint once most of the context is used. A Stop hook, such as \`/goal\`'s, can keep the turn from ending; you are then told so, and keep working instead, since the automatic compaction replaces the conversation with the note.
 - The original messages of every session of this project and of their subagents, compacted or not, stay readable: \`${toolId(TOOL.historyList)}\` lists the sessions and their context windows, \`${toolId(TOOL.historySearch)}\` finds messages that contain a text, and \`${toolId(TOOL.historyRead)}\` reads them a page at a time. When the note lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
 - \`${toolId(TOOL.search)}\` finds the handoff notes of this project that mention a text.
 - Treat the note as internal bookkeeping: you do not need to tell the person each time you update it.${recent}`
@@ -228,13 +228,36 @@ export function periodicReminder(since: number): string {
   return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note was last updated. Update it with ${toolId(TOOL.write)} or ${toolId(TOOL.append)} at the next good point.`
 }
 
-export function urgentReminder(options: { tokens: number; compactAt: number; isNoteCurrent: boolean }): string {
+export function urgentReminder(options: {
+  tokens: number
+  compactAt: number
+  isNoteCurrent: boolean
+  isTurnHeld: boolean
+}): string {
   const left = Math.max(options.compactAt - options.tokens, 0).toLocaleString('en-US')
+  if (options.isTurnHeld) {
+    const save = options.isNoteCurrent ? 'The note is current.' : `Save a concise checkpoint with ${toolId(TOOL.write)} now.`
+
+    return `${MARKER} The context window is nearly exhausted: about ${left} tokens remain before automatic compaction. ${save} ${heldTurnText()}`
+  }
   const action = options.isNoteCurrent
     ? `The note is current: call ${toolId(TOOL.newContext)} and end the turn with a one-line status.`
     : `Save a concise checkpoint with ${toolId(TOOL.write)} now, then call ${toolId(TOOL.newContext)} and end the turn with a one-line status.`
 
   return `${MARKER} The context window is nearly exhausted: about ${left} tokens remain before automatic compaction. ${action} The work continues in a fresh context window on its own.`
+}
+
+/**
+ * What the model is told once a Stop hook, such as `/goal`'s, kept the turn
+ * going after `new_context`: the reset waits for the turn to end, which the
+ * hook does not let happen, so ending the turn again only loops.
+ */
+export function heldTurnText(): string {
+  return `A Stop hook (such as /goal's) keeps this turn going, so the turn does not end and ${toolId(TOOL.newContext)} cannot start a fresh context window in it. Do not end the turn to wait for one and do not call ${toolId(TOOL.newContext)} again in this turn: keep working on the task and keep the note current. When the context fills up, the automatic compaction replaces the conversation with your handoff note, as the reset would have.`
+}
+
+export function heldTurnNotice(): string {
+  return `${MARKER} new_context was cancelled. ${heldTurnText()}`
 }
 
 export function remainingText(options: {

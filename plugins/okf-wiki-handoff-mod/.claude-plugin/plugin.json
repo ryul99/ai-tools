@@ -1,6 +1,6 @@
 {
   "name": "okf-wiki-handoff-mod",
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "Claude Code mod that brings Codex-style context management to Claude Code: an OKF handoff note kept while working, reminders before the context runs out, fresh context windows that hold only the note, notes of their own for long-running subagents, and searchable original transcripts of the project's sessions and subagents",
   "author": {
     "name": "ryul99",

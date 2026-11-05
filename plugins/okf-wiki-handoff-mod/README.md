@@ -91,6 +91,14 @@ If the note is more than 10,000 tokens behind the work at that point, the mod
 first asks a fork of the conversation to bring it up to date. An interrupted
 turn cancels the reset, and so does a session that exits before the turn ends.
 
+A Stop hook can keep the turn from ending: `/goal` does so until its condition
+is met. When one does while a reset waits, the mod cancels the reset and adds
+to the hook's feedback that the turn cannot end, so the agent keeps working
+instead of ending the turn again. For the rest of that turn `new_context`
+starts nothing and says why, and the reminder near automatic compaction asks
+only to save the note: the automatic compaction then replaces the conversation
+with the note, as a reset would.
+
 ## Compactions
 
 Every compaction of the main conversation, automatic or `/compact`, is replaced
