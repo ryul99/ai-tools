@@ -53,8 +53,6 @@ const RESET_RETRY_MS = 200
 type Place = { root: string; folder: string }
 
 type SessionRecord = {
-  /** The note's slug; sessions before 0.2.0 chose one, later ones use the session id. */
-  slug?: string
   /** The context size when the note last changed; absent until the next reading. */
   noteTokens?: number
   remindedTokens?: number
@@ -189,8 +187,8 @@ async function saveRecord($: EngineInterface, record: SessionRecord): Promise<vo
   await $.store.set(await sessionKey($), record)
 }
 
-async function noteConcept($: EngineInterface, place: Place, record: SessionRecord): Promise<string> {
-  const slug = record.slug ?? (await $.session.id()).toLowerCase().replace(/[^a-z0-9-]/g, '-')
+async function noteConcept($: EngineInterface, place: Place): Promise<string> {
+  const slug = (await $.session.id()).toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
   return `${place.folder}/${slug}`
 }
@@ -433,7 +431,7 @@ async function replaceWithHandoff(
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = await noteConcept($, place, record)
+  const concept = await noteConcept($, place)
   const note = await readNote($, place, concept)
   const current = note === undefined ? '' : splitArchive(note.body)
   const { context } = await $.session.usage()
@@ -477,7 +475,6 @@ async function replaceWithHandoff(
   await writeNote($, place, concept, { title, handoff, segments })
   const window = (record.window ?? 1) + 1
   await saveRecord($, {
-    slug: record.slug,
     writes: (record.writes ?? 0) + (title === undefined ? 0 : 1),
     window,
   })
@@ -531,7 +528,7 @@ async function readTool($: EngineInterface, input: Record<string, unknown>): Pro
   if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
     return 'Pass "handoff" as a slug from the list of recent notes.'
   }
-  const concept = slug === undefined ? await noteConcept($, place, await sessionRecord($)) : `${place.folder}/${slug}`
+  const concept = slug === undefined ? await noteConcept($, place) : `${place.folder}/${slug}`
   const note = await readNote($, place, concept)
   if (note === undefined) {
     return `${concept} has not been written yet.`
@@ -553,7 +550,7 @@ async function writeTool($: EngineInterface, input: Record<string, unknown>): Pr
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = await noteConcept($, place, record)
+  const concept = await noteConcept($, place)
   await writeNote($, place, concept, { title, handoff: body, segments: await segmentsOf($, place, concept) })
   const { context } = await $.session.usage()
   await saveRecord($, {
@@ -586,7 +583,7 @@ async function recallTool($: EngineInterface, input: Record<string, unknown>): P
   if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
     return 'Pass "handoff" as a slug from the list of recent notes.'
   }
-  const concept = slug === undefined ? await noteConcept($, place, await sessionRecord($)) : `${place.folder}/${slug}`
+  const concept = slug === undefined ? await noteConcept($, place) : `${place.folder}/${slug}`
   const segments = await segmentsOf($, place, concept)
   const segment = segments[number - 1]
   if (segment === undefined) {
@@ -631,7 +628,7 @@ export const register: Register = on => {
       }
       const place = await handoffPlace($, true)
       if (place !== undefined) {
-        const concept = await noteConcept($, place, record)
+        const concept = await noteConcept($, place)
         runtime.section = guidanceSection({ concept, root: place.root, recent: await recentNotes($, place, concept) })
       }
     } catch (error) {

@@ -28,8 +28,7 @@ use:
 ```
 
 `<project-key>` names the session's project root the way Claude Code names its
-folders under `~/.claude/projects/`. A session that started on an earlier
-version of the mod keeps the slug it chose then. `OKF_ROOT` does not affect
+folders under `~/.claude/projects/`. `OKF_ROOT` does not affect
 where notes go. Read them with
 `okf --root ~/.claude/okf-handoff list handoff/<project-key>`.
 
