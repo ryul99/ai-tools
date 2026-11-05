@@ -4,7 +4,8 @@ This experimental Claude Code mod brings the context management of Codex's
 experimental handoff to Claude Code. The model keeps a handoff note in an OKF
 bundle while it works, is reminded before the context window runs out, and can
 start a fresh context window that holds only the note. Compactions are replaced
-by the note too, and the original messages stay recallable.
+by the note too, and the original messages of every session of the project,
+subagents included, stay searchable and readable.
 
 ```sh
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
@@ -35,23 +36,29 @@ where notes go. Read them with
 ## How the model keeps the note
 
 A system prompt section tells the main agent which note is its own and how to
-keep it: rewrite it whenever the goal, a decision, the state of the work, or
-the next steps change, with the sections `# Goal`, `# State`,
-`# Decisions and constraints`, `# Next steps`, and `# Open questions`. It also
-lists the five most recent notes of other sessions in the project, so a new
-session can pick one of them up.
+keep it: add to it as things happen and rewrite it whole when it needs
+reorganizing. The note has no fixed layout; the section lists what it should
+usually hold, such as the goal, the state of the work with exact paths and
+commands, the person's rules and decisions, and the next steps. It also lists
+the five most recent notes of other sessions in the project, so a new session
+can pick one of them up.
 
 The mod registers these tools, each loaded from the start:
 
 | Tool | What it does |
 | --- | --- |
 | `handoff_write` | Replaces the session's note, creating it when needed. |
+| `handoff_append` | Adds text to the end of the session's note, creating it when needed. |
 | `handoff_read` | Reads the session's note, or another note of the project by its slug. |
+| `handoff_search` | Finds the project's notes that mention a text, with `okf search`. |
 | `context_remaining` | Reports the tokens in use, the window, and how many tokens remain before automatic compaction. |
 | `new_context` | Starts a fresh context window holding only the note when the turn ends. |
-| `recall` | Reads an archived segment of the original conversation. |
+| `history_list` | Lists the project's sessions, or one session's context windows and subagents. |
+| `history_search` | Finds the original messages that contain a text, across the project's sessions and their subagents. |
+| `history_read` | Reads a session's or a subagent's original messages a page at a time. |
 
-Subagents may read notes but cannot write one or call `new_context`.
+Subagents may read and search notes and history but cannot write a note or
+call `new_context`.
 
 ## Reminders
 
@@ -72,8 +79,8 @@ reminders need no guess about the model's context window.
 
 After the agent calls `new_context`, the mod waits for the turn to end, then
 runs `/compact` with its own marker. The mod's compaction hook replaces the
-whole conversation with one message that holds the note and how to recall the
-archived segments, without a summary, and the mod submits a prompt that tells
+whole conversation with one message that holds the note and how to look up
+the original messages, without a summary, and the mod submits a prompt that tells
 the agent to continue from the note. The `/compact` lines appear in the
 transcript.
 
@@ -97,16 +104,25 @@ When the fork gives no usable note, a note that exists is used as it is. If the
 bundle cannot be created, there is no note to use, or `okf` fails, the
 compaction runs as usual and a notice says why.
 
-## Archived originals
+## Original transcripts
 
-Each reset or compaction archives the conversation it replaces as a numbered
-segment of the note. A segment is a pointer, the transcript file and line
-range, kept in the note's `segments` frontmatter.
+A reset or compaction replaces the conversation the model sees, but Claude
+Code's transcript keeps every message, so the history tools read it in place:
+the sessions are the `<session-id>.jsonl` files of the project's folder under
+`~/.claude/projects/`, and their subagents are the
+`<session-id>/subagents/agent-<id>.jsonl` files beside them. A transcript's
+context windows are split at its `compact_boundary` entries.
 
-The model reads a segment back with the `mcp__okf-wiki-handoff-mod__recall`
-tool, which takes `segment`, an optional `handoff` slug in the current project,
-and an optional `from_line` to page through long segments. Recall works only
-while the transcript file exists.
+`history_list` shows each session's line, window and subagent counts, note
+title and first prompt, newest first; given `session`, it shows that session's
+windows by line range and its subagents. `history_search` matches `query`
+ignoring case against whole messages, tool calls and results included, and
+gives each match's session, agent, window and line. `history_read` reads from
+`from_line`, from the start of a `window`, or from the start, and takes
+`agent` for a subagent. Tool calls are clipped in what the tools show.
+
+The transcripts last as long as Claude Code keeps them, `cleanupPeriodDays`,
+30 days by default.
 
 ## Configuration
 
@@ -132,8 +148,8 @@ while the transcript file exists.
 
 ## Development
 
-`hooks/core` links to `../../okf-wiki-handoff/lib/core`, the note store and
-transcript rendering shared with the hook plugin. An install copies the linked
+`hooks/core` links to `../../okf-wiki-handoff/lib/core`, the note store,
+transcript rendering and history tools shared with the hook plugin. An install copies the linked
 files into the plugin, but the engine refuses an import that leaves the plugin
 folder, so a working copy loads only as a copy with the link resolved:
 

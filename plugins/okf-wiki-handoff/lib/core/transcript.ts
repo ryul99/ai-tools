@@ -1,11 +1,14 @@
 import { clip, isRecord } from './common.ts'
-import { segmentsOf } from './notes.ts'
-import type { Store } from './notes.ts'
 
-export const RECALL_CHUNK_LINES = 200
-export const RECALL_MAX_CHARS = 30_000
 const TOOL_INPUT_CHARS = 2_000
 const TOOL_RESULT_CHARS = 4_000
+
+/** How much of a tool call's input and result a rendered entry keeps; a search matches against all of it. */
+export type Detail = 'brief' | 'full'
+
+function cut(text: string, limit: number, detail: Detail): string {
+  return detail === 'full' ? text : clip(text, limit)
+}
 // Codex records its instruction files and environment as user messages.
 const CODEX_INJECTED_PREFIXES = ['# AGENTS.md instructions', '<environment_context>', '<user_instructions>']
 
@@ -23,7 +26,7 @@ function textOf(content: unknown): string {
     .join('\n')
 }
 
-function renderClaudeBlock(block: unknown): string {
+function renderClaudeBlock(block: unknown, detail: Detail): string {
   if (typeof block === 'string') {
     return block
   }
@@ -36,19 +39,19 @@ function renderClaudeBlock(block: unknown): string {
   if (block.type === 'tool_use') {
     const name = typeof block.name === 'string' ? block.name : 'tool'
 
-    return `[tool_use ${name}] ${clip(JSON.stringify(block.input ?? {}), TOOL_INPUT_CHARS)}`
+    return `[tool_use ${name}] ${cut(JSON.stringify(block.input ?? {}), TOOL_INPUT_CHARS, detail)}`
   }
   if (block.type === 'tool_result') {
     const label = block.is_error === true ? 'tool_result error' : 'tool_result'
 
-    return `[${label}] ${clip(textOf(block.content), TOOL_RESULT_CHARS)}`
+    return `[${label}] ${cut(textOf(block.content), TOOL_RESULT_CHARS, detail)}`
   }
 
   return ''
 }
 
 /** One transcript JSONL line as a readable message, from Claude Code or Codex, or `undefined` for none. */
-export function renderEntry(line: string): string | undefined {
+export function renderEntry(line: string, detail: Detail = 'brief'): string | undefined {
   let entry: unknown
   try {
     entry = JSON.parse(line)
@@ -61,7 +64,7 @@ export function renderEntry(line: string): string | undefined {
   if ((entry.type === 'user' || entry.type === 'assistant') && isRecord(entry.message)) {
     const content = entry.message.content
     const text = (Array.isArray(content) ? content : [content])
-      .map(renderClaudeBlock)
+      .map(block => renderClaudeBlock(block, detail))
       .filter(part => part !== '')
       .join('\n')
 
@@ -84,7 +87,7 @@ export function renderEntry(line: string): string | undefined {
     const input = typeof raw === 'string' ? raw : JSON.stringify(raw)
     const name = typeof payload.name === 'string' && payload.name !== '' ? payload.name : 'tool'
 
-    return `assistant: [tool_use ${name}] ${clip(input, TOOL_INPUT_CHARS)}`
+    return `assistant: [tool_use ${name}] ${cut(input, TOOL_INPUT_CHARS, detail)}`
   }
   if (payload.type === 'function_call_output' || payload.type === 'custom_tool_call_output') {
     let output = payload.output
@@ -93,64 +96,41 @@ export function renderEntry(line: string): string | undefined {
     }
     const text = typeof output === 'string' ? output : textOf(output) || JSON.stringify(output ?? null)
 
-    return `tool: [tool_result] ${clip(text, TOOL_RESULT_CHARS)}`
+    return `tool: [tool_result] ${cut(text, TOOL_RESULT_CHARS, detail)}`
   }
 
   return undefined
 }
 
 /**
- * Renders transcript JSONL lines as readable messages, stopping at a whole entry
- * once `maxChars` is reached so the reader can continue from `nextLine`.
+ * Renders transcript JSONL lines as readable messages, with each of `marks`
+ * before its line, stopping at a whole entry once `maxChars` is reached so the
+ * reader can continue from `nextLine`.
  */
 export function renderEntries(
   lines: readonly string[],
   firstLine: number,
   maxChars: number,
+  marks: ReadonlyMap<number, string> = new Map(),
 ): { text: string; nextLine: number | undefined } {
   const parts: string[] = []
   let used = 0
   for (const [offset, line] of lines.entries()) {
+    const number = firstLine + offset
+    const mark = marks.get(number)
     const rendered = renderEntry(line)
-    if (rendered === undefined) {
+    if (rendered === undefined && mark === undefined) {
       continue
     }
-    const part = `L${firstLine + offset} ${rendered}`
+    const part = [mark, rendered === undefined ? undefined : `L${number} ${rendered}`]
+      .filter(piece => piece !== undefined)
+      .join('\n\n')
     if (used > 0 && used + part.length > maxChars) {
-      return { text: parts.join('\n\n'), nextLine: firstLine + offset }
+      return { text: parts.join('\n\n'), nextLine: number }
     }
     parts.push(clip(part, maxChars))
     used += part.length
   }
 
   return { text: parts.join('\n\n'), nextLine: undefined }
-}
-
-/** What `recall` answers: one page of an archived segment, and where the next page starts. */
-export async function recallText(
-  store: Store,
-  concept: string,
-  number: number,
-  fromLine: number | undefined,
-): Promise<string> {
-  const segments = await segmentsOf(store, concept)
-  const segment = segments[number - 1]
-  if (segment === undefined) {
-    return `${concept} has ${segments.length} archived segments.`
-  }
-  if (!(await store.host.exists(segment.transcript))) {
-    return `The archived transcript ${segment.transcript} no longer exists.`
-  }
-  const from = Math.min(Math.max(fromLine ?? segment.from, segment.from), segment.to)
-  const to = Math.min(from + RECALL_CHUNK_LINES - 1, segment.to)
-  const lines = await store.host.readLines(segment.transcript, from, to)
-  const rendered = renderEntries(lines, from, RECALL_MAX_CHARS)
-  const readUpTo = from + lines.length
-  const next = rendered.nextLine ?? (readUpTo <= segment.to ? readUpTo : undefined)
-  const footer =
-    next === undefined
-      ? `[end of segment #${number}]`
-      : `[segment #${number} continues: call recall again with from_line=${next}]`
-
-  return `Segment #${number} of ${concept}, archived ${segment.at}.\n\n${rendered.text || '(no messages in these lines)'}\n\n${footer}`
 }

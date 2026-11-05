@@ -15,10 +15,21 @@ import {
   isRecord,
   noteConcept,
   parsePositive,
+  projectKey,
 } from './core/common.ts'
-import { ensureBundle, nextSegment, noteText, readNote, recentNotes, segmentsOf, writeNote } from './core/notes.ts'
-import type { Host, Store } from './core/notes.ts'
-import { recallText } from './core/transcript.ts'
+import { HISTORY_TOOLS, runHistoryTool } from './core/history.ts'
+import type { HistoryToolName, Locator } from './core/history.ts'
+import {
+  MAX_SEARCH_RESULTS,
+  ensureBundle,
+  noteText,
+  noteTitle,
+  readNote,
+  recentNotes,
+  searchNotesText,
+  writeNote,
+} from './core/notes.ts'
+import type { DirEntry, Host, Store } from './core/notes.ts'
 import {
   CONTINUE_PROMPT,
   PLUGIN,
@@ -46,6 +57,7 @@ const DEFAULT_MARGIN_PERCENT = 5
 const FRESH_TOKENS = 10_000
 const RESET_ATTEMPTS = 50
 const RESET_RETRY_MS = 200
+const DEFAULT_NOTE_SEARCH_LIMIT = 20
 
 /** The handoff bundle and this project's folder of handoff concepts in it. */
 type Place = { store: Store; folder: string }
@@ -73,31 +85,45 @@ const NOTE_SCHEMA = {
   },
 }
 
+const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task; optional.' }
+
 const WRITE_SCHEMA = {
   type: 'object',
   properties: {
     body: { type: 'string', description: 'The whole note in Markdown.' },
-    title: { type: 'string', description: 'A short title for the task; optional.' },
+    title: TITLE_PROPERTY,
   },
   required: ['body'],
 }
 
-const RECALL_SCHEMA = {
+const APPEND_SCHEMA = {
   type: 'object',
   properties: {
-    segment: { type: 'integer', minimum: 1, description: 'The archived segment number.' },
-    handoff: {
-      type: 'string',
-      description: "The handoff slug in this project; defaults to this session's note.",
-    },
-    from_line: {
+    text: { type: 'string', description: 'The Markdown to add.' },
+    title: TITLE_PROPERTY,
+  },
+  required: ['text'],
+}
+
+const SEARCH_SCHEMA = {
+  type: 'object',
+  properties: {
+    query: { type: 'string', description: 'The text to find.' },
+    limit: {
       type: 'integer',
       minimum: 1,
-      description: 'The transcript line to continue from, as a previous call reported.',
+      maximum: MAX_SEARCH_RESULTS,
+      description: `How many matching lines to return; ${DEFAULT_NOTE_SEARCH_LIMIT} by default.`,
     },
   },
-  required: ['segment'],
+  required: ['query'],
 }
+
+const HISTORY_TOOL_NAMES = [
+  TOOL.historyList,
+  TOOL.historySearch,
+  TOOL.historyRead,
+] as const satisfies readonly HistoryToolName[]
 
 const TOOLS = [
   {
@@ -108,8 +134,20 @@ const TOOLS = [
   {
     name: TOOL.write,
     description:
-      "Replace this session's handoff note, creating it when it does not exist. Pass the whole note with the sections # Goal, # State, # Decisions and constraints, # Next steps and # Open questions; the plugin keeps the archived segments.",
+      "Replace the whole of this session's handoff note, creating it when it does not exist. The note has no fixed layout.",
     inputSchema: WRITE_SCHEMA,
+  },
+  {
+    name: TOOL.append,
+    description:
+      "Add text to the end of this session's handoff note, creating it when it does not exist, without passing the rest of the note again.",
+    inputSchema: APPEND_SCHEMA,
+  },
+  {
+    name: TOOL.search,
+    description:
+      'Find the handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds by its slug.',
+    inputSchema: SEARCH_SCHEMA,
   },
   {
     name: TOOL.remaining,
@@ -122,12 +160,11 @@ const TOOLS = [
       'Start a fresh context window when this turn ends: the conversation is replaced by the handoff note and the work continues on its own. Save the note first. Does not touch files or other environment state.',
     inputSchema: { type: 'object', properties: {} },
   },
-  {
-    name: TOOL.recall,
-    description:
-      'Read the original messages of a conversation segment that a context reset or compaction replaced. Use it when the handoff note lacks a detail you need, such as an exact command, error message or file content.',
-    inputSchema: RECALL_SCHEMA,
-  },
+  ...HISTORY_TOOL_NAMES.map(name => ({
+    name,
+    description: HISTORY_TOOLS[name].description,
+    inputSchema: { type: 'object', properties: HISTORY_TOOLS[name].properties, required: [...HISTORY_TOOLS[name].required] },
+  })),
 ]
 
 function engineHost($: EngineInterface): Host {
@@ -145,6 +182,46 @@ function engineHost($: EngineInterface): Host {
       stat => stat.mtimeMs,
       () => undefined,
     ),
+    async list(path) {
+      const entries = await $.fs.list(path).catch(() => [])
+      const listed: DirEntry[] = []
+      for (const entry of entries) {
+        // A link is listed as itself, so what it leads to decides its kind.
+        const target = entry.isLink ? await $.fs.stat(`${path}/${entry.name}`).catch(() => undefined) : entry
+        listed.push({ name: entry.name, kind: target?.kind ?? 'other', mtimeMs: target?.mtimeMs ?? 0 })
+      }
+
+      return listed
+    },
+    readText: path => $.fs.read(path).catch(() => undefined),
+    async lineCount(path) {
+      const ran = await $.process.run(['wc', '-l', path], { timeoutMs: OKF_TIMEOUT_MS })
+      const count = Number.parseInt(ran.stdout.trim(), 10)
+      if (ran.exitCode !== 0 || !Number.isFinite(count)) {
+        throw new Error(`cannot count the lines of ${path}: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+      }
+
+      return count
+    },
+    async grep(path, needle, limit) {
+      const ran = await $.process.run(['grep', '-n', '-i', '-F', '-m', String(limit), '--', needle, path], {
+        timeoutMs: OKF_TIMEOUT_MS,
+      })
+      // grep exits 1 when nothing matches.
+      if (ran.exitCode > 1) {
+        throw new Error(`cannot search ${path}: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+      }
+      const lines = ran.stdout.split('\n')
+      // A truncated output ends mid-line, and the final newline leaves an empty piece.
+      lines.pop()
+
+      return lines.flatMap(line => {
+        const colon = line.indexOf(':')
+        const number = Number.parseInt(line.slice(0, colon), 10)
+
+        return colon > 0 && Number.isFinite(number) ? [{ number, text: line.slice(colon + 1) }] : []
+      })
+    },
     async readLines(path, from, to) {
       const ran = await $.process.run(['sed', '-n', `${from},${to}p;${to}q`, path], { timeoutMs: OKF_TIMEOUT_MS })
       if (ran.exitCode !== 0) {
@@ -203,49 +280,13 @@ async function saveRecord($: EngineInterface, record: SessionRecord): Promise<vo
   await $.store.set(await sessionKey($), record)
 }
 
-async function lineCount($: EngineInterface, path: string): Promise<number | undefined> {
-  const ran = await $.process.run(['wc', '-l', path], { timeoutMs: OKF_TIMEOUT_MS })
-  const count = Number.parseInt(ran.stdout.trim(), 10)
-
-  return ran.exitCode === 0 && Number.isFinite(count) ? count : undefined
-}
-
-/**
- * A mod installed or reloaded mid-session has seen no classic event before its
- * first compaction, so the transcript is then found by the session's id, which
- * names the file in one of the `projects/` folders.
- */
-async function transcriptPath(
-  $: EngineInterface,
-  captured: string | undefined,
-): Promise<string | undefined> {
-  if (captured !== undefined) {
-    return captured
-  }
-  const projects = `${await claudeDirectory($)}/projects`
-  if (!(await $.fs.exists(projects))) {
-    return undefined
-  }
-  const name = `${await $.session.id()}.jsonl`
-  for (const entry of await $.fs.list(projects)) {
-    const path = `${projects}/${entry.name}/${name}`
-    if (entry.kind === 'dir' && (await $.fs.exists(path))) {
-      return path
-    }
-  }
-
-  return undefined
-}
-
 /** What the hooks share; a reload starts it over, while `$.store` keeps the session record. */
 const runtime: {
-  transcript: string | undefined
   limits: Limits | undefined
   guidance: { sessionId: string; text: string } | undefined
   remindTokens: number
   marginPercent: number
 } = {
-  transcript: undefined,
   limits: undefined,
   guidance: undefined,
   remindTokens: DEFAULT_REMIND_TOKENS,
@@ -366,22 +407,7 @@ async function replaceWithHandoff(
     }
   }
 
-  const segments = await segmentsOf(place.store, concept)
-  const path = await transcriptPath($, runtime.transcript)
-  const lastLine = path === undefined ? undefined : await lineCount($, path)
-  const segment =
-    path === undefined || lastLine === undefined
-      ? undefined
-      : nextSegment(segments, path, lastLine, new Date().toISOString())
-  if (segment !== undefined) {
-    segments.push(segment)
-  }
-
-  await writeNote(place.store, concept, {
-    title,
-    body: handoff,
-    segments: segment === undefined ? undefined : segments,
-  })
+  await writeNote(place.store, concept, { title, body: handoff })
   const window = (record.window ?? 1) + 1
   await saveRecord($, {
     writes: (record.writes ?? 0) + (title === undefined ? 0 : 1),
@@ -394,7 +420,6 @@ async function replaceWithHandoff(
     concept,
     handoff,
     prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
-    segments: segments.length,
     window,
     isReset,
   })
@@ -452,10 +477,15 @@ async function readTool($: EngineInterface, input: Record<string, unknown>): Pro
   return typeof named === 'string' ? named : noteText(place.store, named.concept)
 }
 
-async function writeTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
-  const body = typeof input.body === 'string' ? input.body.trim() : ''
+/** Writes or appends to this session's note and counts it as the note's latest version. */
+async function saveTool(
+  $: EngineInterface,
+  input: Record<string, unknown>,
+  options: { field: 'body' | 'text'; isAppend: boolean },
+): Promise<string> {
+  const body = typeof input[options.field] === 'string' ? (input[options.field] as string).trim() : ''
   if (body === '') {
-    return 'Pass "body" as the whole note in Markdown.'
+    return options.isAppend ? 'Pass "text" as the Markdown to add.' : 'Pass "body" as the whole note in Markdown.'
   }
   const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
   const place = await handoffPlace($, true)
@@ -464,7 +494,7 @@ async function writeTool($: EngineInterface, input: Record<string, unknown>): Pr
   }
   const record = await sessionRecord($)
   const concept = noteConcept(place.folder, await $.session.id())
-  await writeNote(place.store, concept, { title, body })
+  await writeNote(place.store, concept, { title, body, append: options.isAppend })
   const { context } = await $.session.usage()
   await saveRecord($, {
     ...record,
@@ -473,7 +503,21 @@ async function writeTool($: EngineInterface, input: Record<string, unknown>): Pr
     remindedTokens: undefined,
   })
 
-  return `Saved ${concept}.`
+  return `${options.isAppend ? 'Appended to' : 'Saved'} ${concept}.`
+}
+
+async function searchTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+  const query = typeof input.query === 'string' ? input.query.trim() : ''
+  if (query === '') {
+    return 'Pass "query" as the text to find.'
+  }
+  const place = await handoffPlace($, false)
+  if (place === undefined) {
+    return 'No handoff note has been written on this machine yet.'
+  }
+  const limit = typeof input.limit === 'number' && Number.isInteger(input.limit) && input.limit > 0 ? input.limit : DEFAULT_NOTE_SEARCH_LIMIT
+
+  return searchNotesText(place.store, place.folder, query, Math.min(limit, MAX_SEARCH_RESULTS))
 }
 
 async function remainingTool($: EngineInterface): Promise<string> {
@@ -483,22 +527,33 @@ async function remainingTool($: EngineInterface): Promise<string> {
   return remainingText({ tokens: context.tokens, window: current.window, compactAt: current.compactAt })
 }
 
-async function recallTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
-  const number = input.segment
-  if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
-    return 'Pass "segment" as a positive integer.'
+async function historyTool($: EngineInterface, name: HistoryToolName, input: Record<string, unknown>): Promise<string> {
+  const root = await $.session.root()
+  const locator: Locator = {
+    kind: 'claude',
+    root: `${await claudeDirectory($)}/projects`,
+    key: projectKey(root),
+    sessionId: await $.session.id(),
   }
   const place = await handoffPlace($, false)
-  if (place === undefined) {
-    return 'No handoff note has been written on this machine yet.'
-  }
-  const named = await namedConcept($, place, input)
-  if (typeof named === 'string') {
-    return named
-  }
-  const fromLine = typeof input.from_line === 'number' && Number.isInteger(input.from_line) ? input.from_line : undefined
+  const titleOf = (sessionId: string) =>
+    place === undefined ? Promise.resolve('') : noteTitle(place.store, noteConcept(place.folder, sessionId))
 
-  return recallText(place.store, named.concept, number, fromLine)
+  return runHistoryTool(name, engineHost($), locator, input, titleOf)
+}
+
+function saveResult(
+  $: EngineInterface,
+  e: object,
+  options: { field: 'body' | 'text'; isAppend: boolean },
+): Promise<string> {
+  const tool = options.isAppend ? TOOL.append : TOOL.write
+
+  return saveTool($, e as Record<string, unknown>, options).catch((error: unknown) => `${tool} failed: ${errorText(error)}`)
+}
+
+function historyResult($: EngineInterface, name: HistoryToolName, e: object): Promise<string> {
+  return historyTool($, name, e as Record<string, unknown>).catch((error: unknown) => `${name} failed: ${errorText(error)}`)
 }
 
 export const register: Register = on => {
@@ -533,18 +588,6 @@ export const register: Register = on => {
     return text === undefined
       ? result
       : { sections: [...result.sections, { id: SECTION_ID, text, scope: 'session' as const }] }
-  })
-
-  // Classic events carry the transcript path, which the archive points into.
-  on('classic.SessionStart', ($, e, next) => {
-    runtime.transcript = e.transcript_path || runtime.transcript
-
-    return next(e)
-  })
-  on('classic.UserPromptSubmit', ($, e, next) => {
-    runtime.transcript = e.transcript_path || runtime.transcript
-
-    return next(e)
   })
 
   on('session.measure', async ($, e, next) => {
@@ -584,12 +627,18 @@ export const register: Register = on => {
   on('tool.call', { tool: toolId(TOOL.write) }, async ($, e) =>
     e.agentId !== undefined
       ? { deny: mainOnly }
-      : {
-          result: await writeTool($, e as unknown as Record<string, unknown>).catch(
-            (error: unknown) => `handoff_write failed: ${errorText(error)}`,
-          ),
-        },
+      : { result: await saveResult($, e, { field: 'body', isAppend: false }) },
   )
+  on('tool.call', { tool: toolId(TOOL.append) }, async ($, e) =>
+    e.agentId !== undefined
+      ? { deny: mainOnly }
+      : { result: await saveResult($, e, { field: 'text', isAppend: true }) },
+  )
+  on('tool.call', { tool: toolId(TOOL.search) }, async ($, e) => ({
+    result: await searchTool($, e as unknown as Record<string, unknown>).catch(
+      (error: unknown) => `${TOOL.search} failed: ${errorText(error)}`,
+    ),
+  }))
   on('tool.call', { tool: toolId(TOOL.remaining) }, async $ => ({
     result: await remainingTool($).catch((error: unknown) => `context_remaining failed: ${errorText(error)}`),
   }))
@@ -604,10 +653,14 @@ export const register: Register = on => {
         'A fresh context window starts when this turn ends: the conversation is replaced by the handoff note, and the work continues on its own. If the note is behind the work, update it with handoff_write first. Then end the turn with a one-line status.',
     }
   })
-  on('tool.call', { tool: toolId(TOOL.recall) }, async ($, e) => ({
-    result: await recallTool($, e as unknown as Record<string, unknown>).catch(
-      (error: unknown) => `recall failed: ${errorText(error)}`,
-    ),
+  on('tool.call', { tool: toolId(TOOL.historyList) }, async ($, e) => ({
+    result: await historyResult($, TOOL.historyList, e),
+  }))
+  on('tool.call', { tool: toolId(TOOL.historySearch) }, async ($, e) => ({
+    result: await historyResult($, TOOL.historySearch, e),
+  }))
+  on('tool.call', { tool: toolId(TOOL.historyRead) }, async ($, e) => ({
+    result: await historyResult($, TOOL.historyRead, e),
   }))
 
   on('turn.complete', async ($, e, next) => {

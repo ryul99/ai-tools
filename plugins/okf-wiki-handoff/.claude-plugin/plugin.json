@@ -1,7 +1,7 @@
 {
   "name": "okf-wiki-handoff",
-  "version": "0.2.0",
-  "description": "Keeps a per-session OKF handoff note current and brings it back, with recallable archived originals, after Claude Code compacts the context.",
+  "version": "0.3.0",
+  "description": "Keeps a per-session OKF handoff note current and brings it back after Claude Code compacts the context, with tools to search the notes and the project's original transcripts.",
   "author": {
     "name": "ryul99",
     "url": "https://github.com/ryul99"

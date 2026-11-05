@@ -19,9 +19,14 @@ export function handoffFolder(projectRoot: string): string {
   return `${HANDOFF_DIR}/${projectKey(projectRoot)}`
 }
 
+/** A session id as the slug of its note. */
+export function sessionSlug(sessionId: string): string {
+  return sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')
+}
+
 /** The note concept of a session in a project folder. */
 export function noteConcept(folder: string, sessionId: string): string {
-  return `${folder}/${sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')}`
+  return `${folder}/${sessionSlug(sessionId)}`
 }
 
 /** A setting such as `25000`, `25k` or `2.5`, or `fallback` when it is not a positive number. */

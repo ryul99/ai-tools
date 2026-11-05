@@ -1,6 +1,7 @@
 import type { SessionMessage } from 'claude-code'
 
 import { MARKER, clip, isRecord } from './core/common.ts'
+import { NOTE_CONTENT } from './core/notes.ts'
 import type { RecentNote } from './core/notes.ts'
 
 export const PLUGIN = 'okf-wiki-handoff-mod'
@@ -10,9 +11,13 @@ export const SECTION_ID = `${PLUGIN}:handoff`
 export const TOOL = {
   read: 'handoff_read',
   write: 'handoff_write',
+  append: 'handoff_append',
+  search: 'handoff_search',
   remaining: 'context_remaining',
   newContext: 'new_context',
-  recall: 'recall',
+  historyList: 'history_list',
+  historySearch: 'history_search',
+  historyRead: 'history_read',
 } as const
 
 export function toolId<Name extends string>(name: Name): `mcp__${typeof PLUGIN}__${Name}` {
@@ -34,12 +39,6 @@ export const PLAN_SCHEMA = {
   required: ['title', 'handoff'],
 }
 
-const NOTE_SECTIONS = `- "# Goal": what the person asked for and what finished looks like.
-- "# State": what is done and what is in progress, with exact file paths, branches, commands, identifiers, and changes not committed yet.
-- "# Decisions and constraints": rules the person set in this conversation and decisions already made. Keep a rule's own wording where it matters; never soften or paraphrase a constraint. Leave out instructions from the system prompt and CLAUDE.md files, which stay in the context on their own.
-- "# Next steps": the concrete next actions, in order.
-- "# Open questions": what is unresolved or waiting on the person, or "None." when nothing is.`
-
 export const RESET_INSTRUCTIONS = `${MARKER} new_context`
 
 export const CONTINUE_PROMPT = `${MARKER} The context was reset to your handoff note at your request. Continue the task from the note.`
@@ -55,18 +54,17 @@ export function guidanceSection(options: {
       ? ''
       : `\n\nRecent handoff notes of other sessions in this project, which \`${toolId(TOOL.read)}\` reads by slug:\n${options.recent
           .map(note => `- \`${note.slug}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
-          .join('\n')}\nWhen the person continues one of these tasks, read that note and carry what still holds into this session's note.`
+          .join('\n')}\nWhen the person continues one of these tasks, or an older one that \`${toolId(TOOL.search)}\` finds, read that note and carry what still holds into this session's note.`
 
   return `# Context management
 
-This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context windows: when the context is reset or compacted, the conversation is replaced by this note, and the original messages survive only as archived segments. Only the main agent keeps the note; a subagent leaves it alone.
+This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context windows: when the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. Only the main agent keeps the note; a subagent leaves it alone.
 
-- Take incremental notes while you work. Rewrite the note with \`${toolId(TOOL.write)}\` whenever the goal, a decision, the state of the work or the next steps change, and before a long or risky step. Each write replaces the whole note, so pass it whole, in the language of the conversation, with these sections in this order:
-${NOTE_SECTIONS}
-  Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages.
+- Take notes while you work, in the language of the conversation. Add to the note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step, a new rule from the person. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. ${NOTE_CONTENT}
 - \`${toolId(TOOL.remaining)}\` tells how many tokens remain before automatic compaction; plan long steps against it.
 - When a reminder says the context is nearly exhausted, save the note, call \`${toolId(TOOL.newContext)}\`, and end the turn with a one-line status. When the turn ends, the conversation is replaced by the note and the work continues in a fresh context window on its own. You may also do this at a natural checkpoint once most of the context is used.
-- After a reset, the first message carries the note. When it lacks a detail you need, such as an exact command, error message or file content, call \`${toolId(TOOL.recall)}\` with a segment number instead of guessing.
+- The original messages of every session of this project and of their subagents, compacted or not, stay readable: \`${toolId(TOOL.historyList)}\` lists the sessions and their context windows, \`${toolId(TOOL.historySearch)}\` finds messages that contain a text, and \`${toolId(TOOL.historyRead)}\` reads them a page at a time. When the note lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
+- \`${toolId(TOOL.search)}\` finds the handoff notes of this project that mention a text.
 - Treat the note as internal bookkeeping: you do not need to tell the person each time you update it.${recent}`
 }
 
@@ -93,15 +91,13 @@ export function plannerPrompt(options: {
 
 ${current}
 
-After this you continue the work with only the note, the person's latest request and the most recent messages. Anything the note leaves out is lost unless you recall an archived segment, so write it for yourself.
+After this you continue the work with only the note, the person's latest request and the most recent messages. Anything the note leaves out has to be looked up again in the transcript, so write it for yourself.
 
 Reply with one JSON object and nothing else: no prose and no code fence. It must match this JSON Schema:
 ${JSON.stringify(PLAN_SCHEMA)}
 
 - "title": a short title for the task.
-- "handoff": Markdown in the language of the conversation, with these sections in this order:
-${NOTE_SECTIONS}
-Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages.
+- "handoff": the whole note, in Markdown in the language of the conversation. ${NOTE_CONTENT}
 ${instructions}${recent}`
 }
 
@@ -190,7 +186,6 @@ export function handoffMessage(options: {
   concept: string
   handoff: string
   prompt: string | undefined
-  segments: number
   window: number
   isReset: boolean
 }): string {
@@ -202,20 +197,17 @@ export function handoffMessage(options: {
       ? ''
       : `The person's latest request, verbatim:\n<<<\n${options.prompt}\n>>>\n\n`
   const note = options.handoff === '' ? '(The note is empty.)' : options.handoff
-  const recall =
-    options.segments === 0
-      ? ''
-      : `\n\nThe original messages are archived as segments #1-#${options.segments} of this note. When a detail you need is missing here, call ${toolId(TOOL.recall)} with a segment number instead of guessing.`
+  const history = `\n\nThe original messages stay in this session's transcript. When a detail you need is missing here, find it with ${toolId(TOOL.historySearch)} or read it with ${toolId(TOOL.historyRead)} instead of guessing.`
 
-  return `${MARKER} This is context window #${options.window}. The conversation before this point ${cause} and was replaced by your handoff note below, the OKF concept ${options.concept} in the bundle ${options.root}. Keep updating it with ${toolId(TOOL.write)}.
+  return `${MARKER} This is context window #${options.window}. The conversation before this point ${cause} and was replaced by your handoff note below, the OKF concept ${options.concept} in the bundle ${options.root}. Keep it current with ${toolId(TOOL.append)} and ${toolId(TOOL.write)}.
 
 ${prompt}<handoff-note>
 ${note}
-</handoff-note>${recall}`
+</handoff-note>${history}`
 }
 
 export function periodicReminder(since: number): string {
-  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note was last updated. Update it with ${toolId(TOOL.write)} at the next good point.`
+  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note was last updated. Update it with ${toolId(TOOL.write)} or ${toolId(TOOL.append)} at the next good point.`
 }
 
 export function urgentReminder(options: { tokens: number; compactAt: number; isNoteCurrent: boolean }): string {

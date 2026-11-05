@@ -2,15 +2,15 @@
 //
 // The hooks keep the agent writing a per-session OKF handoff note and bring that
 // note back after a context compaction. The MCP server gives the agent the tools
-// to read and write the note and to recall archived transcript segments.
+// to read, write, append to and search the notes, and to list, search and read
+// the project's transcripts.
 
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { access, constants, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { access, constants, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { delimiter, dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
-import { setTimeout as sleep } from 'node:timers/promises'
 
 import {
   BUNDLE_NAME,
@@ -22,11 +22,22 @@ import {
   noteConcept,
   parsePositive,
 } from '../lib/core/common.ts'
-import { nextSegment, notePath, noteText, readNote, recentNotes, segmentsOf, writeNote } from '../lib/core/notes.ts'
-import type { Host, RecentNote, Store } from '../lib/core/notes.ts'
-import { recallText } from '../lib/core/transcript.ts'
+import { HISTORY_TOOLS, isHistoryTool, runHistoryTool } from '../lib/core/history.ts'
+import type { Locator } from '../lib/core/history.ts'
+import {
+  MAX_SEARCH_RESULTS,
+  NOTE_CONTENT,
+  notePath,
+  noteText,
+  noteTitle,
+  readNote,
+  recentNotes,
+  searchNotesText,
+  writeNote,
+} from '../lib/core/notes.ts'
+import type { DirEntry, Host, RecentNote, Store } from '../lib/core/notes.ts'
 
-const VERSION = '0.2.0'
+const VERSION = '0.3.0'
 const SERVER_NAME = 'okf-handoff'
 const GENERATED_BY = 'process:okf-wiki-handoff'
 const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context compaction.'
@@ -37,14 +48,6 @@ const OKF_TIMEOUT_MS = 30_000
 const USAGE_TAIL_BYTES = 1_000_000
 const USAGE_WIDE_TAIL_BYTES = 16_000_000
 const MAX_INJECTED_NOTE_CHARS = 20_000
-const LOCK_WAIT_MS = 20_000
-const LOCK_STALE_MS = 60_000
-
-const NOTE_SECTIONS = `- "# Goal": what the person asked for and what finished looks like.
-- "# State": what is done and what is in progress, with exact file paths, branches, commands, identifiers, and changes not committed yet.
-- "# Decisions and constraints": rules the person set and decisions already made. Keep a rule's own wording where it matters; never soften a constraint. Leave out what the system prompt and instruction files already say.
-- "# Next steps": the concrete next actions, in order.
-- "# Open questions": what is unresolved or waiting on the person, or "None." when nothing is.`
 
 type Usage = { id: string; tokens: number }
 
@@ -56,7 +59,7 @@ type State = {
   note_mtime?: number | null
   note_tokens?: number | null
   reminded_tokens?: number | null
-  archived_marker?: string
+  compaction_marker?: string
   stale_usage?: string | null
 }
 
@@ -87,12 +90,20 @@ function hostName(): 'claude' | 'codex' {
   return process.env.PLUGIN_ROOT ? 'codex' : 'claude'
 }
 
-function bundleRoot(host: 'claude' | 'codex'): string {
+function configDirectory(host: 'claude' | 'codex'): string {
   const variable = host === 'codex' ? 'CODEX_HOME' : 'CLAUDE_CONFIG_DIR'
   const configured = (process.env[variable] ?? '').trim()
-  const directory = configured === '' ? join(homedir(), host === 'codex' ? '.codex' : '.claude') : expandHome(configured)
 
-  return join(directory, BUNDLE_NAME)
+  return configured === '' ? join(homedir(), host === 'codex' ? '.codex' : '.claude') : expandHome(configured)
+}
+
+function bundleRoot(host: 'claude' | 'codex'): string {
+  return join(configDirectory(host), BUNDLE_NAME)
+}
+
+/** Where the CLI keeps its transcripts: Claude Code's `projects` folder or Codex's `sessions` folder. */
+function transcriptRoot(host: 'claude' | 'codex'): string {
+  return join(configDirectory(host), host === 'codex' ? 'sessions' : 'projects')
 }
 
 async function onPath(command: string): Promise<string | undefined> {
@@ -159,6 +170,19 @@ async function* fileLines(path: string): AsyncGenerator<string> {
   }
 }
 
+async function lineCount(path: string): Promise<number> {
+  let count = 0
+  for await (const chunk of createReadStream(path)) {
+    for (const byte of chunk as Buffer) {
+      if (byte === 0x0a) {
+        count += 1
+      }
+    }
+  }
+
+  return count
+}
+
 const nodeHost: Host = {
   async okf(args, stdin) {
     const executable = await onPath('okf')
@@ -187,6 +211,35 @@ const nodeHost: Host = {
   },
   exists: async path => (await stat(path).catch(() => undefined)) !== undefined,
   mtimeMs: async path => (await stat(path).catch(() => undefined))?.mtimeMs,
+  async list(path) {
+    const entries = await readdir(path, { withFileTypes: true }).catch(() => [])
+    const listed: DirEntry[] = []
+    for (const entry of entries) {
+      const kind = entry.isFile() ? 'file' : entry.isDirectory() ? 'dir' : 'other'
+      const mtimeMs = kind === 'file' ? ((await stat(join(path, entry.name)).catch(() => undefined))?.mtimeMs ?? 0) : 0
+      listed.push({ name: entry.name, kind, mtimeMs })
+    }
+
+    return listed
+  },
+  readText: path => readFile(path, 'utf8').catch(() => undefined),
+  lineCount,
+  async grep(path, needle, limit) {
+    const lowered = needle.toLowerCase()
+    const hits: { number: number; text: string }[] = []
+    let number = 0
+    for await (const line of fileLines(path)) {
+      number += 1
+      if (line.toLowerCase().includes(lowered)) {
+        hits.push({ number, text: line })
+        if (hits.length >= limit) {
+          break
+        }
+      }
+    }
+
+    return hits
+  },
   async readLines(path, from, to) {
     const lines: string[] = []
     let number = 0
@@ -286,19 +339,6 @@ async function transcriptUsage(path: unknown): Promise<Usage | undefined> {
   return latestUsage(await tailItems(file, USAGE_TAIL_BYTES)) ?? latestUsage(await tailItems(file, USAGE_WIDE_TAIL_BYTES))
 }
 
-async function lineCount(path: string): Promise<number> {
-  let count = 0
-  for await (const chunk of createReadStream(path)) {
-    for (const byte of chunk as Buffer) {
-      if (byte === 0x0a) {
-        count += 1
-      }
-    }
-  }
-
-  return count
-}
-
 /** Identifies the newest compaction recorded in the transcript: Claude Code's compact boundary or Codex's compacted item. */
 async function compactionMarker(transcript: string): Promise<string | undefined> {
   for (const item of (await tailItems(transcript, USAGE_TAIL_BYTES)).reverse()) {
@@ -378,11 +418,15 @@ async function observe(state: State, store: Store, usage: Usage | undefined): Pr
 // Hook messages
 
 function guidance(concept: string, root: string): string {
-  return `${MARKER} This session keeps a handoff note, the OKF concept \`${concept}\` in the bundle \`${root}\`. It is your working memory across context compaction: after a compaction the note is shown to you again, while the rest of the conversation survives only as a summary.
+  return `${MARKER} This session keeps a handoff note, the OKF concept \`${concept}\` in the bundle \`${root}\`. It is your working memory across context compaction: after a compaction the note is shown to you again, while the rest of the conversation survives only as a summary and in the session's transcript.
 
-Keep the note current without being asked. Rewrite it with the \`handoff_write\` tool of the \`${SERVER_NAME}\` MCP server, passing note="${concept}", whenever the goal, a decision, the state of the work or the next steps change, and before a long or risky step. Read it with \`handoff_read\`. If those tools are not loaded yet, load them with tool search first. Each write replaces the whole note, so pass the full note every time, in the language of the conversation, with these sections in this order:
-${NOTE_SECTIONS}
-Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages. You do not need to tell the person each time you update the note.`
+Keep the note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${concept}". If those tools are not loaded yet, load them with tool search first.
+- \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step, a new rule from the person.
+- \`handoff_write\` replaces the whole note. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.
+- \`handoff_read\` reads the note or another note of this project, and \`handoff_search\` finds the project's notes that mention a text.
+- \`history_list\`, \`history_search\` and \`history_read\` list, search and read the original messages of this project's sessions and their subagents, compacted or not. When the note or a summary lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
+
+Write the note in the language of the conversation. ${NOTE_CONTENT} You do not need to tell the person each time you update the note.`
 }
 
 function recentNotesText(notes: readonly RecentNote[]): string {
@@ -391,12 +435,11 @@ function recentNotesText(notes: readonly RecentNote[]): string {
   }
   const lines = notes.map(note => `- \`${note.concept}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
 
-  return `\n\nRecent handoff notes of other sessions in this project:\n${lines.join('\n')}\nWhen the person continues one of these tasks, read that note with \`handoff_read\` and carry what still holds into this session's note.`
+  return `\n\nRecent handoff notes of other sessions in this project:\n${lines.join('\n')}\nWhen the person continues one of these tasks, or an older one you find with \`handoff_search\`, read that note with \`handoff_read\` and carry what still holds into this session's note.`
 }
 
 async function compactedText(store: Store, concept: string): Promise<string> {
   let handoff = (await readNote(store, concept))?.body.trim() ?? ''
-  const segments = await segmentsOf(store, concept)
   let text: string
   if (handoff !== '') {
     if (handoff.length > MAX_INJECTED_NOTE_CHARS) {
@@ -407,11 +450,8 @@ async function compactedText(store: Store, concept: string): Promise<string> {
     text =
       '\n\nThe context was just compacted before the handoff note had any content. Write the note as soon as you have re-established the state.'
   }
-  if (segments.length > 0) {
-    text += `\n\nThe conversation before the compaction is archived as segments #1-#${segments.length} of this note. When a detail you need is missing, call the \`recall\` tool of the \`${SERVER_NAME}\` MCP server with note="${concept}" and a segment number instead of guessing.`
-  }
 
-  return text
+  return `${text}\n\nThe conversation before the compaction is still in this session's transcript. When a detail you need is missing, find it with \`history_search\` or read it with \`history_read\` instead of guessing.`
 }
 
 /** A nudge once `interval` tokens of work have passed since the note last changed, repeated after every further interval. */
@@ -423,7 +463,7 @@ function reminder(concept: string, tokens: number, state: State, interval: numbe
   }
   state.reminded_tokens = tokens
 
-  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${concept}\` was last updated. Update it with \`handoff_write\` at the next good point.`
+  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${concept}\` was last updated. Update it with \`handoff_append\` or \`handoff_write\` at the next good point.`
 }
 
 // ---------------------------------------------------------------------------
@@ -461,74 +501,30 @@ async function onSessionStart(payload: Record<string, unknown>, state: State, st
   return hookContext('SessionStart', text)
 }
 
-/** Runs `body` holding a lock beside `path`, taking over a lock left by a process that died. */
-async function withLock<T>(path: string, body: () => Promise<T>): Promise<T> {
-  const lock = `${path}.lock`
-  const deadline = Date.now() + LOCK_WAIT_MS
-  for (;;) {
-    try {
-      await mkdir(lock)
-      break
-    } catch (error) {
-      if (!isRecord(error) || error.code !== 'EEXIST') {
-        throw error
-      }
-      const held = await stat(lock).catch(() => undefined)
-      if (held !== undefined && Date.now() - held.mtimeMs > LOCK_STALE_MS) {
-        await rm(lock, { recursive: true, force: true })
-        continue
-      }
-      if (Date.now() > deadline) {
-        throw new Error(`${lock} is held by another hook`)
-      }
-      await sleep(50)
-    }
-  }
-  try {
-    return await body()
-  } finally {
-    await rm(lock, { recursive: true, force: true })
-  }
-}
-
 /**
- * Archives the compacted conversation as a segment and resets the reminder,
- * once per compaction. Claude Code may run SessionStart(compact) before or
- * alongside PostCompact, while Codex runs PostCompact first, so the first of
- * the two archives and the marker file, read under a lock, tells the other.
+ * Resets the reminder once per compaction. Claude Code may run
+ * SessionStart(compact) before or alongside PostCompact, while Codex runs
+ * PostCompact first; the transcript's compaction marker tells a later hook
+ * that the compaction was already seen.
  */
-async function archiveCompaction(
+async function resetAfterCompaction(
   payload: Record<string, unknown>,
   state: State,
   store: Store,
   concept: string,
   usage: Usage | undefined,
-  markerPath: string,
 ): Promise<void> {
   const transcript = typeof payload.transcript_path === 'string' ? payload.transcript_path : ''
   if (transcript === '' || !(await isFile(transcript))) {
     return
   }
   const marker = (await compactionMarker(transcript)) ?? `unmarked:${await lineCount(transcript)}`
-  if (marker === state.archived_marker) {
+  if (marker === state.compaction_marker) {
     return
   }
-  await mkdir(dirname(markerPath), { recursive: true })
-  await withLock(markerPath, async () => {
-    const archived = await readFile(markerPath, 'utf8').catch(() => '')
-    if (archived.trim() === marker) {
-      return
-    }
-    const segments = await segmentsOf(store, concept)
-    const segment = nextSegment(segments, transcript, await lineCount(transcript), nowIso())
-    if (segment !== undefined) {
-      await writeNote(store, concept, { segments: [...segments, segment] })
-    }
-    await writeFile(markerPath, marker, 'utf8')
-  })
   // Both hooks of one compaction may reach this with their own state copies;
   // the reset is the same either way.
-  state.archived_marker = marker
+  state.compaction_marker = marker
   state.note_mtime = await noteMtime(store, concept)
   state.note_tokens = null
   state.reminded_tokens = null
@@ -551,19 +547,18 @@ async function runHook(dataDir: string, input: string): Promise<HookOutput> {
   const concept = sessionNote(payload, state, sessionId)
   state.note = concept
   const usage = await transcriptUsage(payload.transcript_path)
-  const markerPath = join(dataDir, 'sessions', `${sessionId}.compaction`)
   let output: HookOutput = {}
   if (event === 'SessionStart') {
     if ((await onPath('okf')) === undefined) {
       return { systemMessage: 'okf-wiki-handoff: the okf command is not on PATH, so no handoff note is kept.' }
     }
     if (payload.source === 'compact') {
-      await archiveCompaction(payload, state, store, concept, usage, markerPath)
+      await resetAfterCompaction(payload, state, store, concept, usage)
     }
     output = await onSessionStart(payload, state, store, concept)
     await observe(state, store, usage)
   } else if (event === 'PostCompact') {
-    await archiveCompaction(payload, state, store, concept, usage, markerPath)
+    await resetAfterCompaction(payload, state, store, concept, usage)
   } else if (event === 'UserPromptSubmit' || event === 'PostToolUse') {
     const tokens = await observe(state, store, usage)
     let message = tokens === undefined ? undefined : reminder(concept, tokens, state, remindTokens())
@@ -600,91 +595,125 @@ async function logError(dataDir: string, error: unknown): Promise<void> {
 
 const NOTE_PROPERTY = {
   type: 'string',
-  description: "The handoff note's concept id, as the session's okf-wiki-handoff instructions give it.",
+  description: "This session's handoff note concept id, as the session's okf-wiki-handoff instructions give it.",
 }
+
+function withNote(properties: Record<string, unknown>, required: readonly string[]): Record<string, unknown> {
+  return {
+    type: 'object',
+    properties: { note: NOTE_PROPERTY, ...properties },
+    required: ['note', ...required],
+    additionalProperties: false,
+  }
+}
+
+const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task; optional.' }
 
 const TOOLS = [
   {
     name: 'handoff_read',
-    description: "Read this session's okf-wiki-handoff note, or another note of this project.",
-    inputSchema: {
-      type: 'object',
-      properties: { note: NOTE_PROPERTY },
-      required: ['note'],
-      additionalProperties: false,
-    },
+    description:
+      "Read this session's okf-wiki-handoff note, or another note of this project: pass that note's concept id as note.",
+    inputSchema: withNote({}, []),
   },
   {
     name: 'handoff_write',
     description:
-      "Replace the content of this session's okf-wiki-handoff note, creating it when it does not exist. Pass the whole note with the sections # Goal, # State, # Decisions and constraints, # Next steps and # Open questions; the archived segments are kept by the plugin.",
-    inputSchema: {
-      type: 'object',
-      properties: {
-        note: NOTE_PROPERTY,
-        body: { type: 'string', description: 'The full note in Markdown.' },
-        title: { type: 'string', description: 'A short title for the task; optional.' },
-      },
-      required: ['note', 'body'],
-      additionalProperties: false,
-    },
+      "Replace the whole content of this session's okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout.",
+    inputSchema: withNote({ body: { type: 'string', description: 'The whole note in Markdown.' }, title: TITLE_PROPERTY }, ['body']),
   },
   {
-    name: 'recall',
+    name: 'handoff_append',
     description:
-      'Read the original messages of a conversation segment that a context compaction replaced. Use it when the handoff note lacks a detail you need, such as an exact command, error message or file content.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        note: NOTE_PROPERTY,
-        segment: { type: 'integer', minimum: 1, description: 'The archived segment number.' },
-        from_line: {
-          type: 'integer',
-          minimum: 1,
-          description: 'The transcript line to continue from, as a previous call reported.',
-        },
-      },
-      required: ['note', 'segment'],
-      additionalProperties: false,
-    },
+      "Add text to the end of this session's okf-wiki-handoff note, creating it when it does not exist, without passing the rest of the note again.",
+    inputSchema: withNote({ text: { type: 'string', description: 'The Markdown to add.' }, title: TITLE_PROPERTY }, ['text']),
   },
+  {
+    name: 'handoff_search',
+    description:
+      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds with handoff_read.",
+    inputSchema: withNote(
+      {
+        query: { type: 'string', description: 'The text to find.' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS, description: 'How many matching lines to return; 20 by default.' },
+      },
+      ['query'],
+    ),
+  },
+  ...Object.entries(HISTORY_TOOLS).map(([name, tool]) => ({
+    name,
+    description: tool.description,
+    inputSchema: withNote(tool.properties, tool.required),
+  })),
 ]
 
-function checkedNote(input: Record<string, unknown>): string {
+/** The note a tool names, and the project folder and session it belongs to. */
+function checkedNote(input: Record<string, unknown>): { concept: string; folder: string; key: string; slug: string } {
   const note = input.note
   if (typeof note !== 'string' || !NOTE_PATTERN.test(note)) {
     throw new Error('Pass "note" as the handoff concept id, such as handoff/<project-key>/<session-id>.')
   }
+  const [, key = '', slug = ''] = note.split('/')
 
-  return note
+  return { concept: note, folder: note.slice(0, note.lastIndexOf('/')), key, slug }
 }
 
-const TOOL_HANDLERS: Record<string, (store: Store, input: Record<string, unknown>) => Promise<string>> = {
-  handoff_read: (store, input) => noteText(store, checkedNote(input)),
-  async handoff_write(store, input) {
-    const concept = checkedNote(input)
-    const body = input.body
-    if (typeof body !== 'string' || body.trim() === '') {
-      throw new Error('Pass "body" as the full note in Markdown.')
-    }
-    const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
-    await writeNote(store, concept, { title, body })
+function requiredText(input: Record<string, unknown>, key: string, what: string): string {
+  const value = input[key]
+  if (typeof value !== 'string' || value.trim() === '') {
+    throw new Error(`Pass "${key}" as ${what}.`)
+  }
+
+  return value
+}
+
+function optionalTitle(input: Record<string, unknown>): string | undefined {
+  return typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
+}
+
+type Server = { store: Store; host: 'claude' | 'codex' }
+
+const TOOL_HANDLERS: Record<string, (server: Server, input: Record<string, unknown>) => Promise<string>> = {
+  handoff_read: ({ store }, input) => noteText(store, checkedNote(input).concept),
+  async handoff_write({ store }, input) {
+    const { concept } = checkedNote(input)
+    await writeNote(store, concept, { title: optionalTitle(input), body: requiredText(input, 'body', 'the whole note in Markdown') })
 
     return `Saved ${concept}.`
   },
-  async recall(store, input) {
-    const concept = checkedNote(input)
-    const number = input.segment
-    if (typeof number !== 'number' || !Number.isInteger(number) || number < 1) {
-      throw new Error('Pass "segment" as a positive integer.')
-    }
-    const fromLine = typeof input.from_line === 'number' && Number.isInteger(input.from_line) ? input.from_line : undefined
+  async handoff_append({ store }, input) {
+    const { concept } = checkedNote(input)
+    await writeNote(store, concept, {
+      title: optionalTitle(input),
+      body: requiredText(input, 'text', 'the Markdown to add'),
+      append: true,
+    })
 
-    return recallText(store, concept, number, fromLine)
+    return `Appended to ${concept}.`
+  },
+  handoff_search({ store }, input) {
+    const { folder } = checkedNote(input)
+    const limit = typeof input.limit === 'number' && Number.isInteger(input.limit) && input.limit > 0 ? input.limit : 20
+
+    return searchNotesText(store, folder, requiredText(input, 'query', 'the text to find'), Math.min(limit, MAX_SEARCH_RESULTS))
   },
 }
 
-async function mcpResponse(request: Record<string, unknown>, store: Store): Promise<unknown> {
+async function callTool(server: Server, name: string, input: Record<string, unknown>): Promise<string | undefined> {
+  const handler = TOOL_HANDLERS[name]
+  if (handler !== undefined) {
+    return await handler(server, input)
+  }
+  if (!isHistoryTool(name)) {
+    return undefined
+  }
+  const { folder, key, slug } = checkedNote(input)
+  const locator: Locator = { kind: server.host, root: transcriptRoot(server.host), key, sessionId: slug }
+
+  return await runHistoryTool(name, nodeHost, locator, input, sessionId => noteTitle(server.store, noteConcept(folder, sessionId)))
+}
+
+async function mcpResponse(request: Record<string, unknown>, server: Server): Promise<unknown> {
   const id = request.id
   if (id === undefined || id === null) {
     return undefined
@@ -706,13 +735,14 @@ async function mcpResponse(request: Record<string, unknown>, store: Store): Prom
       result = { tools: TOOLS }
       break
     case 'tools/call': {
-      const handler = typeof params.name === 'string' ? TOOL_HANDLERS[params.name] : undefined
-      if (handler === undefined) {
-        return { jsonrpc: '2.0', id, error: { code: -32602, message: 'unknown tool' } }
-      }
+      const name = typeof params.name === 'string' ? params.name : ''
       const input = isRecord(params.arguments) ? params.arguments : {}
       try {
-        result = { content: [{ type: 'text', text: await handler(store, input) }] }
+        const text = await callTool(server, name, input)
+        if (text === undefined) {
+          return { jsonrpc: '2.0', id, error: { code: -32602, message: 'unknown tool' } }
+        }
+        result = { content: [{ type: 'text', text }] }
       } catch (error) {
         result = { content: [{ type: 'text', text: errorText(error) }], isError: true }
       }
@@ -726,7 +756,7 @@ async function mcpResponse(request: Record<string, unknown>, store: Store): Prom
 }
 
 async function runMcp(host: 'claude' | 'codex'): Promise<void> {
-  const store = storeAt(bundleRoot(host))
+  const server: Server = { store: storeAt(bundleRoot(host)), host }
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Number.POSITIVE_INFINITY })) {
     if (line.trim() === '') {
       continue
@@ -740,7 +770,7 @@ async function runMcp(host: 'claude' | 'codex'): Promise<void> {
     if (!isRecord(request)) {
       continue
     }
-    const response = await mcpResponse(request, store)
+    const response = await mcpResponse(request, server)
     if (response !== undefined) {
       process.stdout.write(`${JSON.stringify(response)}\n`)
     }
