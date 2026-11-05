@@ -96,11 +96,15 @@ read from its own transcript:
   tell callers apart, so this rests on the instructions.
 - The CLI compacts a subagent as usual. Afterwards, when the subagent has a
   note, it is told once that the note is there to read with `handoff_read`,
-  without its content. In Claude Code the notice comes with the compaction's
-  `SessionStart` hook, or else with the subagent's next tool call once its
-  transcript shows a new compaction. Codex runs no `SessionStart` for a
-  subagent and lets `PostCompact` add no context, so there the notice always
-  comes with the subagent's next tool call or input.
+  without its content. The notice comes with the subagent's next tool call
+  (or, in Codex, its next input) once its transcript shows the compaction:
+  neither CLI's compaction hooks can reach the subagent with it.
+- Claude Code runs a subagent's compaction hooks (`SessionStart` with source
+  `compact`, `PostCompact`) with the session's input and no `agent_id`. While
+  the session's last message is a tool call still waiting for its result, as
+  it is during a subagent's run, the session cannot be compacting, so those
+  hooks leave the session's note and reminders alone. A background subagent
+  compacted while the session is idle is still taken for the session.
 - A subagent's note stays after it finishes, and `handoff_search` finds it.
   The list of recent notes at session start shows sessions' notes only.
 

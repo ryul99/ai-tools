@@ -42,7 +42,7 @@ import {
 } from '../lib/core/notes.ts'
 import type { DirEntry, Host, RecentNote, Store } from '../lib/core/notes.ts'
 
-const VERSION = '0.4.0'
+const VERSION = '0.4.1'
 const SERVER_NAME = 'okf-handoff'
 const GENERATED_BY = 'process:okf-wiki-handoff'
 const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context compaction.'
@@ -536,9 +536,12 @@ async function resetAfterCompaction(
  * short subagent is left as it is, and the CLI compacts it as usual: afterwards
  * it is only told that its note is there.
  *
- * Both CLIs give a subagent's hooks `agent_id` and the session's `session_id`.
- * Claude Code's `transcript_path` is the session's, beside which the
- * subagent's transcript lies; Codex's is the subagent's own rollout.
+ * Both CLIs give a subagent's tool hooks `agent_id` and the session's
+ * `session_id`. Claude Code's `transcript_path` is the session's, beside which
+ * the subagent's transcript lies; Codex's is the subagent's own rollout.
+ * Neither tells a subagent's compaction hooks apart in a way that can reach the
+ * subagent (Claude Code gives them no `agent_id`, Codex lets PostCompact add no
+ * context), so the compaction is found in the transcript at its next tool call.
  */
 async function runAgentHook(
   dataDir: string,
@@ -548,10 +551,9 @@ async function runAgentHook(
   host: 'claude' | 'codex',
 ): Promise<HookOutput> {
   const event = payload.hook_event_name
-  const isCompactStart = event === 'SessionStart' && payload.source === 'compact'
-  // Codex runs no SessionStart for a subagent, but gives its later inputs UserPromptSubmit.
+  // Codex gives a subagent's later inputs UserPromptSubmit.
   const isTurnPoint = event === 'PostToolUse' || event === 'UserPromptSubmit'
-  if (!isCompactStart && !isTurnPoint && event !== 'PostCompact') {
+  if (!isTurnPoint && event !== 'PostCompact') {
     return {}
   }
   const store = storeAt(bundleRoot(host))
@@ -568,12 +570,11 @@ async function runAgentHook(
         : ''
   const usage = await transcriptUsage(transcript, true)
   const messages: string[] = []
-  // A compaction whose own hooks could not tell the subagent, as Codex's never can, is found in the transcript.
   const marker = transcript === '' ? undefined : await compactionMarker(transcript)
-  if (event === 'PostCompact' || isCompactStart || (marker !== undefined && marker !== state.compaction_marker)) {
+  if (event === 'PostCompact' || (marker !== undefined && marker !== state.compaction_marker)) {
     await resetAfterCompaction(transcript, state, store, concept, usage)
   }
-  if (event !== 'PostCompact' && marker !== undefined && marker !== state.noticed_marker) {
+  if (isTurnPoint && marker !== undefined && marker !== state.noticed_marker) {
     state.noticed_marker = marker
     const modifiedMs = await store.host.mtimeMs(notePath(store, concept))
     if (modifiedMs !== undefined) {
@@ -592,7 +593,31 @@ async function runAgentHook(
   }
   await saveState(dataDir, owner, state)
 
-  return messages.length === 0 || event === 'PostCompact' ? {} : hookContext(String(event), messages.join('\n\n'))
+  return messages.length === 0 || !isTurnPoint ? {} : hookContext(String(event), messages.join('\n\n'))
+}
+
+/**
+ * Whether the session's own conversation waits on a tool call it made, which
+ * a subagent's run is. Claude Code runs a subagent's compaction hooks with the
+ * session's input and no `agent_id`, and has not yet written the compaction to
+ * either transcript; the session cannot be compacting while it waits, since it
+ * compacts only before a request, once the results of its tool calls are in.
+ */
+async function isAwaitingTool(transcript: string): Promise<boolean> {
+  if (transcript === '') {
+    return false
+  }
+  for (const item of (await tailItems(expandHome(transcript), USAGE_TAIL_BYTES)).reverse()) {
+    const message = item.message
+    if ((item.type !== 'user' && item.type !== 'assistant') || !isRecord(message) || item.isSidechain === true) {
+      continue
+    }
+    const content = message.content
+
+    return item.type === 'assistant' && Array.isArray(content) && content.some(block => isRecord(block) && block.type === 'tool_use')
+  }
+
+  return false
 }
 
 async function runHook(dataDir: string, input: string): Promise<HookOutput> {
@@ -610,12 +635,17 @@ async function runHook(dataDir: string, input: string): Promise<HookOutput> {
     return SESSION_PATTERN.test(agentId) ? await runAgentHook(dataDir, payload, sessionId, agentId, hostName()) : {}
   }
   const event = payload.hook_event_name
+  const transcript = typeof payload.transcript_path === 'string' ? payload.transcript_path : ''
+  const isCompaction = event === 'PostCompact' || (event === 'SessionStart' && payload.source === 'compact')
+  // A subagent's compaction there would otherwise hand it the session's note and reset the session's reminders.
+  if (isCompaction && hostName() === 'claude' && (await isAwaitingTool(transcript))) {
+    return {}
+  }
   const store = storeAt(bundleRoot(hostName()))
   const owner: Owner = { sessionId }
   const state = await loadState(dataDir, owner)
   const concept = sessionNote(payload, state, sessionId)
   state.note = concept
-  const transcript = typeof payload.transcript_path === 'string' ? payload.transcript_path : ''
   const usage = await transcriptUsage(transcript)
   let output: HookOutput = {}
   if (event === 'SessionStart') {
