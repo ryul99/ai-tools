@@ -2,6 +2,9 @@
 
 A small collection of plugins for Codex and Claude Code.
 
+> This repository is vibe-coded: most of its code and docs are written by AI
+> coding agents under human direction.
+
 ## Plugins
 
 | Plugin | Codex | Claude Code | Description |
