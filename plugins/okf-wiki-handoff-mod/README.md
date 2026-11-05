@@ -101,8 +101,7 @@ compaction runs as usual and a notice says why.
 
 Each reset or compaction archives the conversation it replaces as a numbered
 segment of the note. A segment is a pointer, the transcript file and line
-range, kept in the note's `segments` frontmatter; the body's
-`# Archived segments` section lists the segment numbers and line ranges.
+range, kept in the note's `segments` frontmatter.
 
 The model reads a segment back with the `mcp__okf-wiki-handoff-mod__recall`
 tool, which takes `segment`, an optional `handoff` slug in the current project,

@@ -25,7 +25,6 @@ const TAIL_BUDGET_CHARS = 24_000
 const RECENT_RESULTS_CHARS = 8_000
 const TOOL_INPUT_CHARS = 2_000
 const TOOL_RESULT_CHARS = 4_000
-const ARCHIVE_PATTERN = /^# Archived segments[ \t]*$/m
 
 export type Segment = { at: string; transcript: string; from: number; to: number }
 
@@ -110,7 +109,7 @@ ${JSON.stringify(PLAN_SCHEMA)}
 - "title": a short title for the task.
 - "handoff": Markdown in the language of the conversation, with these sections in this order:
 ${NOTE_SECTIONS}
-Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages. Do not add an archive section; the plugin appends one.
+Record only what the conversation shows, and keep exact names, paths, commands, numbers and error messages.
 ${instructions}${recent}`
 }
 
@@ -134,7 +133,7 @@ export function parsePlan(reply: string): Plan | undefined {
     return undefined
   }
 
-  return { title: title.trim(), handoff: splitArchive(handoff) }
+  return { title: title.trim(), handoff: handoff.trim() }
 }
 
 function isPrompt(message: SessionMessage): boolean {
@@ -197,38 +196,6 @@ export function recentToolResults(messages: readonly SessionMessage[]): string |
 /** Names a project the way Claude Code names its folders under `projects/`. */
 export function projectKey(projectRoot: string): string {
   return projectRoot.replace(/[^A-Za-z0-9]/g, '-')
-}
-
-/** The note's own text, without the archive section the plugin appends. */
-export function splitArchive(body: string): string {
-  const match = ARCHIVE_PATTERN.exec(body)
-
-  return (match === null ? body : body.slice(0, match.index)).trim()
-}
-
-export function archiveSection(segments: readonly Segment[]): string {
-  const lines = segments.map(
-    (segment, index) =>
-      `- #${index + 1}: transcript lines ${segment.from}-${segment.to}, archived ${segment.at}`,
-  )
-
-  return `# Archived segments
-
-The original conversation is archived as the transcript line ranges in this note's
-\`segments\` frontmatter. Read a segment with the \`recall\` tool of ${PLUGIN}.
-
-${lines.join('\n')}
-`
-}
-
-export function noteBody(handoff: string, segments: readonly Segment[]): string {
-  const text = handoff.trim()
-  const body = text === '' ? '' : `${text}\n`
-  if (segments.length === 0) {
-    return body
-  }
-
-  return body === '' ? archiveSection(segments) : `${body}\n${archiveSection(segments)}`
 }
 
 export function handoffMessage(options: {

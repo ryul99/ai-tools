@@ -21,7 +21,6 @@ import {
   isRecord,
   keptTail,
   latestPrompt,
-  noteBody,
   parsePlan,
   periodicReminder,
   plannerPrompt,
@@ -29,7 +28,6 @@ import {
   recentToolResults,
   remainingText,
   renderEntries,
-  splitArchive,
   toolId,
   urgentReminder,
 } from './handoff'
@@ -268,10 +266,11 @@ async function writeNote(
   if (current === undefined) {
     throw new Error(`${concept} disappeared while it was written`)
   }
+  const text = options.handoff.trim()
   await okf(
     $,
     [...root, 'body', 'set', concept, '--if-match', current.identity],
-    noteBody(options.handoff, options.segments),
+    text === '' ? '' : `${text}\n`,
   )
 }
 
@@ -433,7 +432,7 @@ async function replaceWithHandoff(
   const record = await sessionRecord($)
   const concept = await noteConcept($, place)
   const note = await readNote($, place, concept)
-  const current = note === undefined ? '' : splitArchive(note.body)
+  const current = note === undefined ? '' : note.body.trim()
   const { context } = await $.session.usage()
   const since =
     context.tokens !== undefined && record.noteTokens !== undefined
@@ -536,11 +535,11 @@ async function readTool($: EngineInterface, input: Record<string, unknown>): Pro
   const segments = await segmentsOf($, place, concept)
   const footer = segments.length === 0 ? '' : `\n\n[${segments.length} archived segments: read them with recall]`
 
-  return `${concept}\n\n${splitArchive(note.body) || '(empty)'}${footer}`
+  return `${concept}\n\n${note.body.trim() || '(empty)'}${footer}`
 }
 
 async function writeTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
-  const body = typeof input.body === 'string' ? splitArchive(input.body) : ''
+  const body = typeof input.body === 'string' ? input.body.trim() : ''
   if (body === '') {
     return 'Pass "body" as the whole note in Markdown.'
   }
