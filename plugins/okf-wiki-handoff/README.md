@@ -23,7 +23,12 @@ codex plugin add okf-wiki-handoff@ryul99-ai-tools
 ```
 
 The plugin needs Node.js 22.18 or newer, which runs its TypeScript directly,
-and `okf` 0.2.0 or newer on `PATH`. If `okf` is missing, the session starts
+and `okf` 0.2.0 or newer. When `okf` is neither on `PATH` nor in uv's tool
+bin folder (`uv tool dir --bin`), the session start installs it with
+`uv tool install git+https://github.com/ryul99/okf-wiki.git` and says so. In
+Claude Code it also adds that folder to the `PATH` of the agent's shells
+through `CLAUDE_ENV_FILE`, so the `okf-wiki` skill finds `okf` too. If the
+install fails, for example without `uv` or network access, the session starts
 with a notice and no note is kept.
 
 ## Where notes are stored

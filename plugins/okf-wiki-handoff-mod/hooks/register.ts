@@ -34,6 +34,7 @@ import {
   writeNote,
 } from './core/notes.ts'
 import type { DirEntry, Host, Store } from './core/notes.ts'
+import { ensureOkf, okfFolder } from './core/okf_cli.ts'
 import {
   CONTINUE_PROMPT,
   PLUGIN,
@@ -191,7 +192,7 @@ const TOOLS = [
 function engineHost($: EngineInterface): Host {
   return {
     async okf(args, stdin) {
-      const ran = await $.process.run(['okf', '--format', 'json', ...args], { stdin, timeoutMs: OKF_TIMEOUT_MS })
+      const ran = await $.process.run([runtime.okf, '--format', 'json', ...args], { stdin, timeoutMs: OKF_TIMEOUT_MS })
       if (ran.exitCode !== 0) {
         throw new Error(`okf ${args.join(' ')} failed: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
       }
@@ -347,12 +348,35 @@ const runtime: {
   marginPercent: number
   /** The main loop's running turn, which `session.append` does not name. */
   turnId: string | undefined
+  /** The okf command, a full path when uv put it off the PATH. */
+  okf: string
 } = {
   limits: undefined,
   guidance: undefined,
   remindTokens: DEFAULT_REMIND_TOKENS,
   marginPercent: DEFAULT_MARGIN_PERCENT,
   turnId: undefined,
+  okf: 'okf',
+}
+
+async function setUpOkf($: EngineInterface): Promise<void> {
+  const setup = await ensureOkf(
+    (argv, timeoutMs) => $.process.run(argv, { timeoutMs }),
+    () => $.ui.status('okf handoff: installing okf'),
+  ).finally(() => $.ui.status(undefined))
+  if ('error' in setup) {
+    $.ui.toast(`okf handoff: ${setup.error}, so no handoff note is kept`)
+
+    return
+  }
+  runtime.okf = setup.path
+  if (setup.isInstalled) {
+    $.ui.toast(`okf handoff: installed okf at ${setup.path}`)
+  }
+  if (!setup.isOnPath) {
+    // For the agent's shells, and so the okf-wiki skill; the engine's environment is what they inherit.
+    await $.env.set('PATH', `${okfFolder(setup.path)}:${(await $.env.get('PATH')) ?? ''}`)
+  }
 }
 
 function isTurnHeld(record: SessionRecord): boolean {
@@ -755,6 +779,7 @@ export const register: Register = on => {
     runtime.remindTokens = parsePositive(await $.env.get('OKF_HANDOFF_REMIND_TOKENS'), DEFAULT_REMIND_TOKENS)
     const margin = parsePositive(await $.env.get('OKF_HANDOFF_MARGIN_PERCENT'), DEFAULT_MARGIN_PERCENT)
     runtime.marginPercent = margin < 100 ? margin : DEFAULT_MARGIN_PERCENT
+    await setUpOkf($)
     try {
       const record = await sessionRecord($)
       if (record.isResetPending === true) {

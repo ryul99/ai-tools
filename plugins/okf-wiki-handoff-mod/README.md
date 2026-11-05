@@ -11,9 +11,12 @@ subagents included, stay searchable and readable.
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
 ```
 
-It declares `okf-wiki` as a dependency and requires `okf` 0.2.0 or newer on
-`PATH`. Install either this mod or the `okf-wiki-handoff` hook plugin, not
-both.
+It declares `okf-wiki` as a dependency and requires `okf` 0.2.0 or newer.
+When `okf` is neither on `PATH` nor in uv's tool bin folder, the session start
+installs it with `uv tool install git+https://github.com/ryul99/okf-wiki.git`,
+puts that folder on the session's `PATH`, and says so in a toast; when the
+install fails, the toast says why and no note is kept. Install either this mod
+or the `okf-wiki-handoff` hook plugin, not both.
 
 ## Where notes are stored
 

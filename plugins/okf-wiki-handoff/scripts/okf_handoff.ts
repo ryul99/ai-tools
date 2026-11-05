@@ -7,9 +7,9 @@
 
 import { spawn } from 'node:child_process'
 import { createReadStream } from 'node:fs'
-import { access, constants, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
-import { delimiter, dirname, join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
 
 import {
@@ -41,8 +41,10 @@ import {
   writeNote,
 } from '../lib/core/notes.ts'
 import type { DirEntry, Host, RecentNote, Store } from '../lib/core/notes.ts'
+import { ensureOkf, locateOkf, pathExport } from '../lib/core/okf_cli.ts'
+import type { OkfCommand, OkfSetup } from '../lib/core/okf_cli.ts'
 
-const VERSION = '0.4.1'
+const VERSION = '0.5.0'
 const SERVER_NAME = 'okf-handoff'
 const GENERATED_BY = 'process:okf-wiki-handoff'
 const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context compaction.'
@@ -111,28 +113,9 @@ function transcriptRoot(host: 'claude' | 'codex'): string {
   return join(configDirectory(host), host === 'codex' ? 'sessions' : 'projects')
 }
 
-async function onPath(command: string): Promise<string | undefined> {
-  for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-    if (directory === '') {
-      continue
-    }
-    const candidate = join(directory, command)
-    try {
-      await access(candidate, constants.X_OK)
-      if ((await stat(candidate)).isFile()) {
-        return candidate
-      }
-    } catch {
-      // Not in this directory.
-    }
-  }
-
-  return undefined
-}
-
 function run(
   argv: readonly string[],
-  options: { cwd?: string; stdin?: string },
+  options: { cwd?: string; stdin?: string; timeoutMs?: number },
 ): Promise<{ exitCode: number; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
     const [command, ...args] = argv
@@ -141,7 +124,7 @@ function run(
 
       return
     }
-    const child = spawn(command, args, { cwd: options.cwd, timeout: OKF_TIMEOUT_MS, stdio: 'pipe' })
+    const child = spawn(command, args, { cwd: options.cwd, timeout: options.timeoutMs ?? OKF_TIMEOUT_MS, stdio: 'pipe' })
     const stdout: Buffer[] = []
     const stderr: Buffer[] = []
     child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
@@ -188,9 +171,31 @@ async function lineCount(path: string): Promise<number> {
   return count
 }
 
+const runCommand = (argv: readonly string[], timeoutMs: number) => run(argv, { timeoutMs })
+
+let okfCommand: OkfCommand | undefined
+
+async function setUpOkf(): Promise<OkfSetup> {
+  const setup = await ensureOkf(runCommand)
+  okfCommand = 'error' in setup ? undefined : setup
+
+  return setup
+}
+
+/** Codex has no `CLAUDE_ENV_FILE`; its cloud image has uv's bin folder on the PATH already. */
+async function exposeOkf(found: OkfCommand): Promise<void> {
+  const envFile = (process.env.CLAUDE_ENV_FILE ?? '').trim()
+  const line = pathExport(found)
+  if (envFile !== '' && line !== undefined) {
+    await appendFile(envFile, line, 'utf8')
+  }
+}
+
 const nodeHost: Host = {
   async okf(args, stdin) {
-    const executable = await onPath('okf')
+    // A miss is not kept: the MCP server starts while the session start may still be installing okf.
+    okfCommand ??= await locateOkf(runCommand)
+    const executable = okfCommand?.path
     if (executable === undefined) {
       throw new Error('okf command is not available')
     }
@@ -649,13 +654,19 @@ async function runHook(dataDir: string, input: string): Promise<HookOutput> {
   const usage = await transcriptUsage(transcript)
   let output: HookOutput = {}
   if (event === 'SessionStart') {
-    if ((await onPath('okf')) === undefined) {
-      return { systemMessage: 'okf-wiki-handoff: the okf command is not on PATH, so no handoff note is kept.' }
+    const setup = await setUpOkf()
+    if ('error' in setup) {
+      return { systemMessage: `okf-wiki-handoff: ${setup.error}, so no handoff note is kept.` }
     }
+    // The note works without it; only the agent's own shells would miss okf.
+    await exposeOkf(setup).catch(() => undefined)
     if (payload.source === 'compact') {
       await resetAfterCompaction(transcript, state, store, concept, usage)
     }
     output = await onSessionStart(payload, state, store, concept)
+    if (setup.isInstalled) {
+      output.systemMessage = `okf-wiki-handoff: installed okf at ${setup.path}`
+    }
     await observe(state, store, usage)
   } else if (event === 'PostCompact') {
     await resetAfterCompaction(transcript, state, store, concept, usage)

@@ -7,7 +7,7 @@
           {
             "type": "command",
             "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
-            "timeout": 30
+            "timeout": 300
           }
         ]
       }

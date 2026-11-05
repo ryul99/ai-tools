@@ -85,7 +85,10 @@ Write this explanation in clear Korean.
 Investigate related GitHub issues and pull requests.
 ```
 
-The `okf-wiki` plugin expects the `okf` CLI to be installed. Run it inside a wiki, provide the wiki root in your request, or set it once for your shell:
+The `okf-wiki` plugin expects the `okf` CLI to be installed. The handoff plugin
+and its mod install it with
+`uv tool install git+https://github.com/ryul99/okf-wiki.git` at session start
+when it is missing. Run it inside a wiki, provide the wiki root in your request, or set it once for your shell:
 
 ```sh
 export OKF_ROOT=/path/to/wiki
