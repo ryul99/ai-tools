@@ -7,6 +7,8 @@ export const HANDOFF_DIR = 'handoff'
 export const HANDOFF_TAG = 'autosave-handoff'
 export const HANDOFF_TYPE = 'Handoff'
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
+/** A note's slug in its project folder: a session's, or a subagent's under its session's. */
+export const NOTE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(?:\/agent-[a-z0-9][a-z0-9-]{0,127})?$/
 export const DEFAULT_REMIND_TOKENS = 25_000
 
 /** Names a project the way Claude Code names its folders under `projects/`. */
@@ -27,6 +29,11 @@ export function sessionSlug(sessionId: string): string {
 /** The note concept of a session in a project folder. */
 export function noteConcept(folder: string, sessionId: string): string {
   return `${folder}/${sessionSlug(sessionId)}`
+}
+
+/** The note concept of a subagent, beside its session's note so the two read as one task. */
+export function agentConcept(sessionConcept: string, agentId: string): string {
+  return `${sessionConcept}/agent-${sessionSlug(agentId)}`
 }
 
 /** A setting such as `25000`, `25k` or `2.5`, or `fallback` when it is not a positive number. */

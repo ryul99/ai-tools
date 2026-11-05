@@ -102,6 +102,62 @@ export function renderEntry(line: string, detail: Detail = 'brief'): string | un
   return undefined
 }
 
+/** A context size a transcript reports, and the entry that reported it. */
+export type Usage = { id: string; tokens: number }
+
+/** The whole JSON objects among transcript lines, skipping any cut short. */
+export function parseItems(lines: Iterable<string>): Record<string, unknown>[] {
+  const items: Record<string, unknown>[] = []
+  for (const line of lines) {
+    try {
+      const item: unknown = JSON.parse(line)
+      if (isRecord(item)) {
+        items.push(item)
+      }
+    } catch {
+      // Not a whole JSON line.
+    }
+  }
+
+  return items
+}
+
+/**
+ * The newest context size among transcript entries: Claude Code's last
+ * assistant usage, or Codex's last token count. A session's transcript also
+ * holds sidechain entries that are not its own context; a subagent's
+ * transcript (`isAgent`) holds nothing else.
+ */
+export function latestUsage(items: readonly Record<string, unknown>[], isAgent = false): Usage | undefined {
+  for (const item of [...items].reverse()) {
+    const message = item.message
+    if (item.type === 'assistant' && isRecord(message) && (isAgent || !item.isSidechain)) {
+      const usage = message.usage
+      if (!isRecord(usage)) {
+        continue
+      }
+      const tokens = ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens']
+        .map(key => usage[key])
+        .reduce<number>((total, count) => total + (Number.isInteger(count) ? (count as number) : 0), 0)
+      if (tokens > 0) {
+        return { id: String(item.uuid || item.timestamp || ''), tokens }
+      }
+      continue
+    }
+    const payload = item.payload
+    if (item.type === 'event_msg' && isRecord(payload) && payload.type === 'token_count') {
+      const info = payload.info
+      const last = isRecord(info) ? info.last_token_usage : undefined
+      const tokens = isRecord(last) ? last.total_tokens : undefined
+      if (typeof tokens === 'number' && Number.isInteger(tokens) && tokens > 0) {
+        return { id: `${item.timestamp}#${item.ordinal}`, tokens }
+      }
+    }
+  }
+
+  return undefined
+}
+
 /**
  * Renders transcript JSONL lines as readable messages, with each of `marks`
  * before its line, stopping at a whole entry once `maxChars` is reached so the

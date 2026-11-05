@@ -71,6 +71,14 @@ async function claudeFolder(host: Host, locator: Locator): Promise<string | unde
   return undefined
 }
 
+/** A Claude Code subagent's transcript in the asking session, or `undefined` before it exists. */
+export async function claudeAgentTranscript(host: Host, locator: Locator, agentId: string): Promise<string | undefined> {
+  const folder = await claudeFolder(host, locator)
+  const path = folder === undefined ? undefined : `${folder}/${locator.sessionId}/subagents/agent-${agentId}.jsonl`
+
+  return path !== undefined && (await host.exists(path)) ? path : undefined
+}
+
 async function claudeAgents(host: Host, folder: string): Promise<Agent[]> {
   const agents: Agent[] = []
   if (!(await host.exists(folder))) {

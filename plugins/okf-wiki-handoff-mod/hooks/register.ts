@@ -9,7 +9,8 @@ import type {
 import {
   BUNDLE_NAME,
   DEFAULT_REMIND_TOKENS,
-  SLUG_PATTERN,
+  NOTE_SLUG_PATTERN,
+  agentConcept,
   errorText,
   handoffFolder,
   isRecord,
@@ -17,16 +18,19 @@ import {
   parsePositive,
   projectKey,
 } from './core/common.ts'
-import { HISTORY_TOOLS, runHistoryTool } from './core/history.ts'
+import { HISTORY_TOOLS, claudeAgentTranscript, runHistoryTool } from './core/history.ts'
 import type { HistoryToolName, Locator } from './core/history.ts'
+import { latestUsage, parseItems } from './core/transcript.ts'
 import {
   MAX_SEARCH_RESULTS,
   ensureBundle,
+  notePath,
   noteText,
   noteTitle,
   readNote,
   recentNotes,
   searchNotesText,
+  utcMinute,
   writeNote,
 } from './core/notes.ts'
 import type { DirEntry, Host, Store } from './core/notes.ts'
@@ -36,6 +40,9 @@ import {
   RESET_INSTRUCTIONS,
   SECTION_ID,
   TOOL,
+  agentCompactedNotice,
+  agentGuidance,
+  agentRemainingText,
   guidanceSection,
   handoffMessage,
   keptTail,
@@ -58,6 +65,8 @@ const FRESH_TOKENS = 10_000
 const RESET_ATTEMPTS = 50
 const RESET_RETRY_MS = 200
 const DEFAULT_NOTE_SEARCH_LIMIT = 20
+const USAGE_TAIL_BYTES = 1_000_000
+const USAGE_WIDE_TAIL_BYTES = 16_000_000
 
 /** The handoff bundle and this project's folder of handoff concepts in it. */
 type Place = { store: Store; folder: string }
@@ -71,6 +80,14 @@ type SessionRecord = {
   writes?: number
   isResetPending?: boolean
   window?: number
+}
+
+/** What the mod remembers about one subagent of the session, which keeps a note of its own. */
+type AgentRecord = {
+  /** The subagent's context size when its note last changed, or when it was first seen. */
+  noteTokens?: number
+  remindedTokens?: number
+  isGuided?: boolean
 }
 
 type Limits = { window: number; compactAt: number | undefined }
@@ -280,6 +297,44 @@ async function saveRecord($: EngineInterface, record: SessionRecord): Promise<vo
   await $.store.set(await sessionKey($), record)
 }
 
+async function agentKey($: EngineInterface, agentId: string): Promise<string> {
+  return `${await sessionKey($)}:agent:${agentId}`
+}
+
+async function agentRecord($: EngineInterface, agentId: string): Promise<AgentRecord> {
+  const stored = await $.store.get(await agentKey($, agentId))
+
+  return isRecord(stored) ? (stored as AgentRecord) : {}
+}
+
+async function saveAgentRecord($: EngineInterface, agentId: string, record: AgentRecord): Promise<void> {
+  await $.store.set(await agentKey($, agentId), record)
+}
+
+function agentNote(place: Place, sessionId: string, agentId: string): string {
+  return agentConcept(noteConcept(place.folder, sessionId), agentId)
+}
+
+/**
+ * A subagent's context size from its transcript's last response, since
+ * `$.session.usage()` measures the main conversation alone.
+ */
+async function agentTokens($: EngineInterface, agentId: string): Promise<number | undefined> {
+  const path = await claudeAgentTranscript(engineHost($), await transcriptLocator($), agentId)
+  if (path === undefined) {
+    return undefined
+  }
+  for (const bytes of [USAGE_TAIL_BYTES, USAGE_WIDE_TAIL_BYTES]) {
+    const ran = await $.process.run(['tail', '-c', String(bytes), path], { timeoutMs: OKF_TIMEOUT_MS })
+    const usage = ran.exitCode === 0 ? latestUsage(parseItems(ran.stdout.split('\n')), true) : undefined
+    if (usage !== undefined) {
+      return usage.tokens
+    }
+  }
+
+  return undefined
+}
+
 /** What the hooks share; a reload starts it over, while `$.store` keeps the session record. */
 const runtime: {
   limits: Limits | undefined
@@ -368,6 +423,48 @@ async function dueReminder($: EngineInterface): Promise<string | undefined> {
   return text
 }
 
+/**
+ * A subagent's reminder: its first one, once its work has run long, gives it
+ * its note. A subagent cannot start a fresh window, so none is urgent.
+ */
+async function dueAgentReminder($: EngineInterface, agentId: string): Promise<string | undefined> {
+  const tokens = await agentTokens($, agentId)
+  if (tokens === undefined) {
+    return undefined
+  }
+  const record = await agentRecord($, agentId)
+  if (record.noteTokens === undefined) {
+    // A subagent is first seen at its first tool call, holding only its task.
+    await saveAgentRecord($, agentId, { ...record, noteTokens: tokens })
+
+    return undefined
+  }
+  const since = tokens - record.noteTokens
+  if (
+    since < runtime.remindTokens ||
+    (record.remindedTokens !== undefined && tokens - record.remindedTokens < runtime.remindTokens)
+  ) {
+    return undefined
+  }
+  let text = periodicReminder(since)
+  if (record.isGuided !== true) {
+    const place = await handoffPlace($, true)
+    if (place === undefined) {
+      return undefined
+    }
+    const sessionId = await $.session.id()
+    text = agentGuidance({
+      concept: agentNote(place, sessionId, agentId),
+      root: place.store.root,
+      sessionSlug: noteConcept(place.folder, sessionId).slice(place.folder.length + 1),
+      agentId,
+    })
+  }
+  await saveAgentRecord($, agentId, { ...record, remindedTokens: tokens, isGuided: true })
+
+  return text
+}
+
 async function replaceWithHandoff(
   $: EngineInterface,
   e: SessionCompactInput,
@@ -428,6 +525,42 @@ async function replaceWithHandoff(
   return { messages: [{ role: 'user', text, toolUses: [] }, ...tail] }
 }
 
+/**
+ * Claude Code compacts a subagent as usual; when the subagent keeps a note, one
+ * message after the summary tells it the note is there to read.
+ */
+async function noticeAgentNote(
+  $: EngineInterface,
+  e: SessionCompactInput,
+  agentId: string,
+  result: SessionCompactResult,
+): Promise<SessionCompactResult> {
+  if (result.messages === undefined) {
+    return result
+  }
+  // The baseline is the compacted context, read at the subagent's next tool call.
+  await saveAgentRecord($, agentId, { ...(await agentRecord($, agentId)), noteTokens: undefined, remindedTokens: undefined })
+  const place = await handoffPlace($, false)
+  if (place === undefined) {
+    return result
+  }
+  const concept = agentNote(place, await $.session.id(), agentId)
+  const modifiedMs = await place.store.host.mtimeMs(notePath(place.store, concept))
+  if (modifiedMs === undefined) {
+    return result
+  }
+  const before = new Set(e.messages.map(message => message.handle))
+  // The summary is the message the compaction made, ahead of the ones it kept.
+  const summary = result.messages.findIndex(message => message.handle === undefined || !before.has(message.handle))
+  const at = (summary === -1 ? 0 : summary) + 1
+  const text = agentCompactedNotice({ concept, modified: utcMinute(modifiedMs), agentId })
+
+  return {
+    ...result,
+    messages: [...result.messages.slice(0, at), { role: 'user', text, toolUses: [] }, ...result.messages.slice(at)],
+  }
+}
+
 /** Resets the context once the turn that asked for it has let go of the session. */
 async function resetContext($: EngineInterface): Promise<void> {
   for (let attempt = 0; attempt < RESET_ATTEMPTS; attempt += 1) {
@@ -453,35 +586,43 @@ async function resetContext($: EngineInterface): Promise<void> {
   await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
 }
 
-/** The note a tool names by its `handoff` slug, or this session's own; a string when the input is unusable. */
+/** The caller's own note: the session's for the main agent, a subagent's its own. */
+async function ownConcept($: EngineInterface, place: Place, agentId: string | undefined): Promise<string> {
+  const sessionId = await $.session.id()
+
+  return agentId === undefined ? noteConcept(place.folder, sessionId) : agentNote(place, sessionId, agentId)
+}
+
+/** The note a tool names by its `handoff` slug, or the caller's own; a string when the input is unusable. */
 async function namedConcept(
   $: EngineInterface,
   place: Place,
   input: Record<string, unknown>,
+  agentId: string | undefined,
 ): Promise<{ concept: string } | string> {
   const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
-  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
+  if (slug !== undefined && !NOTE_SLUG_PATTERN.test(slug)) {
     return 'Pass "handoff" as a slug from the list of recent notes.'
   }
 
-  return { concept: slug === undefined ? noteConcept(place.folder, await $.session.id()) : `${place.folder}/${slug}` }
+  return { concept: slug === undefined ? await ownConcept($, place, agentId) : `${place.folder}/${slug}` }
 }
 
-async function readTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
+async function readTool($: EngineInterface, input: Record<string, unknown>, agentId: string | undefined): Promise<string> {
   const place = await handoffPlace($, false)
   if (place === undefined) {
     return 'No handoff note has been written on this machine yet.'
   }
-  const named = await namedConcept($, place, input)
+  const named = await namedConcept($, place, input, agentId)
 
   return typeof named === 'string' ? named : noteText(place.store, named.concept)
 }
 
-/** Writes or appends to this session's note and counts it as the note's latest version. */
+/** Writes or appends to the caller's own note and counts it as the note's latest version. */
 async function saveTool(
   $: EngineInterface,
   input: Record<string, unknown>,
-  options: { field: 'body' | 'text'; isAppend: boolean },
+  options: { field: 'body' | 'text'; isAppend: boolean; agentId: string | undefined },
 ): Promise<string> {
   const body = typeof input[options.field] === 'string' ? (input[options.field] as string).trim() : ''
   if (body === '') {
@@ -492,16 +633,28 @@ async function saveTool(
   if (place === undefined) {
     throw new Error('the handoff bundle could not be created')
   }
-  const record = await sessionRecord($)
-  const concept = noteConcept(place.folder, await $.session.id())
+  const { agentId } = options
+  const concept = await ownConcept($, place, agentId)
   await writeNote(place.store, concept, { title, body, append: options.isAppend })
-  const { context } = await $.session.usage()
-  await saveRecord($, {
-    ...record,
-    writes: (record.writes ?? 0) + 1,
-    noteTokens: context.tokens,
-    remindedTokens: undefined,
-  })
+  if (agentId === undefined) {
+    const record = await sessionRecord($)
+    const { context } = await $.session.usage()
+    await saveRecord($, {
+      ...record,
+      writes: (record.writes ?? 0) + 1,
+      noteTokens: context.tokens,
+      remindedTokens: undefined,
+    })
+  } else {
+    const record = await agentRecord($, agentId)
+    await saveAgentRecord($, agentId, {
+      ...record,
+      // A subagent that keeps its note unprompted needs no guidance later.
+      isGuided: true,
+      noteTokens: (await agentTokens($, agentId)) ?? record.noteTokens,
+      remindedTokens: undefined,
+    })
+  }
 
   return `${options.isAppend ? 'Appended to' : 'Saved'} ${concept}.`
 }
@@ -520,21 +673,27 @@ async function searchTool($: EngineInterface, input: Record<string, unknown>): P
   return searchNotesText(place.store, place.folder, query, Math.min(limit, MAX_SEARCH_RESULTS))
 }
 
-async function remainingTool($: EngineInterface): Promise<string> {
+async function remainingTool($: EngineInterface, agentId: string | undefined): Promise<string> {
+  if (agentId !== undefined) {
+    return agentRemainingText(await agentTokens($, agentId))
+  }
   const current = await refreshLimits($)
   const { context } = await $.session.usage()
 
   return remainingText({ tokens: context.tokens, window: current.window, compactAt: current.compactAt })
 }
 
-async function historyTool($: EngineInterface, name: HistoryToolName, input: Record<string, unknown>): Promise<string> {
-  const root = await $.session.root()
-  const locator: Locator = {
+async function transcriptLocator($: EngineInterface): Promise<Locator> {
+  return {
     kind: 'claude',
     root: `${await claudeDirectory($)}/projects`,
-    key: projectKey(root),
+    key: projectKey(await $.session.root()),
     sessionId: await $.session.id(),
   }
+}
+
+async function historyTool($: EngineInterface, name: HistoryToolName, input: Record<string, unknown>): Promise<string> {
+  const locator = await transcriptLocator($)
   const place = await handoffPlace($, false)
   const titleOf = (sessionId: string) =>
     place === undefined ? Promise.resolve('') : noteTitle(place.store, noteConcept(place.folder, sessionId))
@@ -545,7 +704,7 @@ async function historyTool($: EngineInterface, name: HistoryToolName, input: Rec
 function saveResult(
   $: EngineInterface,
   e: object,
-  options: { field: 'body' | 'text'; isAppend: boolean },
+  options: { field: 'body' | 'text'; isAppend: boolean; agentId: string | undefined },
 ): Promise<string> {
   const tool = options.isAppend ? TOOL.append : TOOL.write
 
@@ -607,44 +766,42 @@ export const register: Register = on => {
     return next(text === undefined ? e : { ...e, context: [...(e.context ?? []), text] })
   })
 
-  // Reminders ride on the results of the main agent's other tools, as a PostToolUse hook's context does.
+  // Reminders ride on the results of an agent's other tools, as a PostToolUse hook's context does.
   on('tool.call', async ($, e, next) => {
     const result: ToolCallResult = await next(e)
-    if (e.agentId !== undefined || e.tool.startsWith(toolId('')) || result.deny !== undefined) {
+    if (e.tool.startsWith(toolId('')) || result.deny !== undefined) {
       return result
     }
-    const text = await dueReminder($).catch(() => undefined)
+    const due = e.agentId === undefined ? dueReminder($) : dueAgentReminder($, e.agentId)
+    const text = await due.catch(() => undefined)
 
     return text === undefined ? result : { ...result, context: [...(result.context ?? []), text] }
   })
 
-  const mainOnly = 'Only the main agent keeps the handoff note.'
   on('tool.call', { tool: toolId(TOOL.read) }, async ($, e) => ({
-    result: await readTool($, e as unknown as Record<string, unknown>).catch(
+    result: await readTool($, e as unknown as Record<string, unknown>, e.agentId).catch(
       (error: unknown) => `handoff_read failed: ${errorText(error)}`,
     ),
   }))
-  on('tool.call', { tool: toolId(TOOL.write) }, async ($, e) =>
-    e.agentId !== undefined
-      ? { deny: mainOnly }
-      : { result: await saveResult($, e, { field: 'body', isAppend: false }) },
-  )
-  on('tool.call', { tool: toolId(TOOL.append) }, async ($, e) =>
-    e.agentId !== undefined
-      ? { deny: mainOnly }
-      : { result: await saveResult($, e, { field: 'text', isAppend: true }) },
-  )
+  on('tool.call', { tool: toolId(TOOL.write) }, async ($, e) => ({
+    result: await saveResult($, e, { field: 'body', isAppend: false, agentId: e.agentId }),
+  }))
+  on('tool.call', { tool: toolId(TOOL.append) }, async ($, e) => ({
+    result: await saveResult($, e, { field: 'text', isAppend: true, agentId: e.agentId }),
+  }))
   on('tool.call', { tool: toolId(TOOL.search) }, async ($, e) => ({
     result: await searchTool($, e as unknown as Record<string, unknown>).catch(
       (error: unknown) => `${TOOL.search} failed: ${errorText(error)}`,
     ),
   }))
-  on('tool.call', { tool: toolId(TOOL.remaining) }, async $ => ({
-    result: await remainingTool($).catch((error: unknown) => `context_remaining failed: ${errorText(error)}`),
+  on('tool.call', { tool: toolId(TOOL.remaining) }, async ($, e) => ({
+    result: await remainingTool($, e.agentId).catch((error: unknown) => `context_remaining failed: ${errorText(error)}`),
   }))
   on('tool.call', { tool: toolId(TOOL.newContext) }, async ($, e) => {
     if (e.agentId !== undefined) {
-      return { deny: mainOnly }
+      return {
+        deny: 'A subagent cannot start a fresh context window. Keep your handoff note current instead: when your context fills up, Claude Code compacts it as usual and you are told the note is there.',
+      }
     }
     await saveRecord($, { ...(await sessionRecord($)), isResetPending: true })
 
@@ -685,8 +842,19 @@ export const register: Register = on => {
   })
 
   on('session.compact', async ($, e, next) => {
-    if (e.agentId !== undefined) {
-      return next(e)
+    const { agentId } = e
+    if (agentId !== undefined) {
+      const result = await next(e)
+      // A precomputed summary installs nothing; the compaction that uses it is noticed instead.
+      if (e.trigger === 'precompute') {
+        return result
+      }
+
+      return noticeAgentNote($, e, agentId, result).catch((error: unknown) => {
+        $.ui.toast(`okf handoff: a subagent was not told about its note: ${errorText(error)}`)
+
+        return result
+      })
     }
     // The note is written when the compaction runs, so a precomputed summary would be wasted.
     if (e.trigger === 'precompute') {

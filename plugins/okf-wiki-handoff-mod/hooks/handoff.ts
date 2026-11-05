@@ -58,7 +58,7 @@ export function guidanceSection(options: {
 
   return `# Context management
 
-This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context windows: when the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. Only the main agent keeps the note; a subagent leaves it alone.
+This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context windows: when the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. Only the main agent keeps this note; a subagent leaves it alone and is given a note of its own once its work runs long.
 
 - Take notes while you work, in the language of the conversation. Add to the note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step, a new rule from the person. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. ${NOTE_CONTENT}
 - \`${toolId(TOOL.remaining)}\` tells how many tokens remain before automatic compaction; plan long steps against it.
@@ -66,6 +66,24 @@ This session keeps a handoff note, the OKF concept \`${options.concept}\` in the
 - The original messages of every session of this project and of their subagents, compacted or not, stay readable: \`${toolId(TOOL.historyList)}\` lists the sessions and their context windows, \`${toolId(TOOL.historySearch)}\` finds messages that contain a text, and \`${toolId(TOOL.historyRead)}\` reads them a page at a time. When the note lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
 - \`${toolId(TOOL.search)}\` finds the handoff notes of this project that mention a text.
 - Treat the note as internal bookkeeping: you do not need to tell the person each time you update it.${recent}`
+}
+
+/** Given to a subagent once its work runs long, never at its start, so a short subagent is left as it is. */
+export function agentGuidance(options: { concept: string; root: string; sessionSlug: string; agentId: string }): string {
+  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory: when your context fills up, the compaction leaves only a summary of your conversation and you are told the note is there to read, while the original messages stay in your transcript. The main agent keeps its own note, which you leave alone.
+
+- Add to your note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. Both write your own note. Your task is what the agent that started you asked for. ${NOTE_CONTENT}
+- \`${toolId(TOOL.read)}\` reads your note, or another note of this project by its slug; the main agent's is \`${options.sessionSlug}\`.
+- \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your own original messages, and \`${toolId(TOOL.historySearch)}\` finds messages that contain a text. When the note lacks a detail you need, look it up there instead of guessing.
+- Your final answer still goes to the agent that started you, as usual.`
+}
+
+/**
+ * What a subagent is told after Claude Code compacted it: that its note is
+ * there to read, not the note itself, which would repeat much of the summary.
+ */
+export function agentCompactedNotice(options: { concept: string; modified: string; agentId: string }): string {
+  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${options.concept}\`, last updated ${options.modified}. Read it with \`${toolId(TOOL.read)}\` before you continue, when the summary leaves out something you need; \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your original messages.`
 }
 
 export function plannerPrompt(options: {
@@ -234,4 +252,14 @@ export function remainingText(options: {
   const left = Math.max(options.compactAt - options.tokens, 0).toLocaleString('en-US')
 
   return `${used} Automatic compaction runs at ${options.compactAt.toLocaleString('en-US')} tokens, so about ${left} tokens remain.`
+}
+
+/** A subagent's context as its transcript reports it; the session's window and threshold are the main agent's. */
+export function agentRemainingText(tokens: number | undefined): string {
+  const fill =
+    tokens === undefined
+      ? "Your context's fill as a subagent is unknown until your next response."
+      : `About ${tokens.toLocaleString('en-US')} tokens are in use in your context as a subagent.`
+
+  return `${fill} A subagent cannot start a fresh context window: when its context fills up, Claude Code compacts it as usual, so keep your handoff note current.`
 }

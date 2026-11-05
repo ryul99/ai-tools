@@ -1,7 +1,7 @@
 {
   "name": "okf-wiki-handoff",
-  "version": "0.3.0",
-  "description": "Keeps a per-session OKF handoff note current and brings it back after Claude Code compacts the context, with tools to search the notes and the project's original transcripts.",
+  "version": "0.4.0",
+  "description": "Keeps a per-session OKF handoff note current and brings it back after Claude Code compacts the context, gives long-running subagents notes of their own, and adds tools to search the notes and the project's original transcripts.",
   "author": {
     "name": "ryul99",
     "url": "https://github.com/ryul99"

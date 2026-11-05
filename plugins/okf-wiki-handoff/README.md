@@ -38,9 +38,10 @@ creating it with `okf init` on first use:
 
 A note is the concept `handoff/<project-key>/<session-id>` with type
 `Handoff` and tag `autosave-handoff`. `<project-key>` names the project root
-the way Claude Code names its folders under `~/.claude/projects/`. `OKF_ROOT`
-does not affect where notes go. Read them with, for example,
-`okf --root ~/.claude/okf-handoff list handoff/<project-key>`.
+the way Claude Code names its folders under `~/.claude/projects/`. A Claude
+Code subagent's note is `handoff/<project-key>/<session-id>/agent-<agent-id>`,
+beside its session's. `OKF_ROOT` does not affect where notes go. Read them
+with, for example, `okf --root ~/.claude/okf-handoff list handoff/<project-key>`.
 
 ## How the note is kept current
 
@@ -56,7 +57,7 @@ does not affect where notes go. Read them with, for example,
    a note with `handoff_read` and finds the project's notes that mention a
    text with `handoff_search`, which runs `okf search` over the bundle and
    keeps the project's notes. All of them are served by the plugin's
-   `okf-handoff` MCP server and take the session's note id as `note`. Writes
+   `okf-handoff` MCP server and take the caller's note id as `note`. Writes
    go through `okf new`, `okf meta set`, and `okf body set --if-match`.
 3. After a prompt or a tool call, once 25,000 tokens of context have been
    added since the note last changed, the agent gets a one-line reminder to
@@ -74,6 +75,34 @@ the agent following the instructions and reminders.
 When the context is compacted, automatic or manual, the new context gets the
 session instructions again and the note's content, next to the summary that
 the CLI writes, which is left as it is.
+
+## Subagents
+
+A subagent keeps a note of its own once its work runs long. In both CLIs its
+hooks carry `agent_id` and the session's `session_id`, and its context size is
+read from its own transcript:
+
+| CLI | Subagent's transcript |
+| --- | --- |
+| Claude Code | `<session-id>/subagents/agent-<agent-id>.jsonl` beside the session's, which `transcript_path` names |
+| Codex | its own rollout, which `transcript_path` names; `agent_id` is its thread id |
+
+- A subagent hears nothing about notes at first, so a short one is left as it
+  is. Once 25,000 tokens of context have been added since its first tool call,
+  its next tool result carries the instructions and its note id, and the
+  reminders follow as for the session. In Codex, an input the subagent is sent
+  later (`UserPromptSubmit`) carries them too. The instructions name the
+  session's note as one it may read but never write; the MCP server cannot
+  tell callers apart, so this rests on the instructions.
+- The CLI compacts a subagent as usual. Afterwards, when the subagent has a
+  note, it is told once that the note is there to read with `handoff_read`,
+  without its content. In Claude Code the notice comes with the compaction's
+  `SessionStart` hook, or else with the subagent's next tool call once its
+  transcript shows a new compaction. Codex runs no `SessionStart` for a
+  subagent and lets `PostCompact` add no context, so there the notice always
+  comes with the subagent's next tool call or input.
+- A subagent's note stays after it finishes, and `handoff_search` finds it.
+  The list of recent notes at session start shows sessions' notes only.
 
 ## Original transcripts
 
@@ -113,7 +142,8 @@ the plugin data directory.
   shown next to the CLI's own summary, not in place of it.
 - At a compaction the note can lag the work by up to one reminder interval;
   `history_search` and `history_read` reach what it misses.
-- Subagents get no note; their hooks are ignored.
+- A subagent's note is not shown after its compaction, only pointed to, so the
+  subagent reads it only if it chooses to.
 - Notes are machine-owned working state. Move durable conclusions into curated
   concepts manually.
 

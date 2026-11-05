@@ -26,10 +26,12 @@ use:
 ~/.claude/okf-handoff/
   index.md
   handoff/<project-key>/<session-id>.md
+  handoff/<project-key>/<session-id>/agent-<agent-id>.md
 ```
 
 `<project-key>` names the session's project root the way Claude Code names its
-folders under `~/.claude/projects/`. `OKF_ROOT` does not affect
+folders under `~/.claude/projects/`. The second path is a subagent's own note.
+`OKF_ROOT` does not affect
 where notes go. Read them with
 `okf --root ~/.claude/okf-handoff list handoff/<project-key>`.
 
@@ -47,9 +49,9 @@ The mod registers these tools, each loaded from the start:
 
 | Tool | What it does |
 | --- | --- |
-| `handoff_write` | Replaces the session's note, creating it when needed. |
-| `handoff_append` | Adds text to the end of the session's note, creating it when needed. |
-| `handoff_read` | Reads the session's note, or another note of the project by its slug. |
+| `handoff_write` | Replaces the caller's note, creating it when needed. |
+| `handoff_append` | Adds text to the end of the caller's note, creating it when needed. |
+| `handoff_read` | Reads the caller's note, or another note of the project by its slug. |
 | `handoff_search` | Finds the project's notes that mention a text, with `okf search`. |
 | `context_remaining` | Reports the tokens in use, the window, and how many tokens remain before automatic compaction. |
 | `new_context` | Starts a fresh context window holding only the note when the turn ends. |
@@ -57,13 +59,14 @@ The mod registers these tools, each loaded from the start:
 | `history_search` | Finds the original messages that contain a text, across the project's sessions and their subagents. |
 | `history_read` | Reads a session's or a subagent's original messages a page at a time. |
 
-Subagents may read and search notes and history but cannot write a note or
-call `new_context`.
+The caller's note is the session's for the main agent and a subagent's own for
+a subagent; see [Subagents](#subagents).
 
 ## Reminders
 
 Reminders reach the main agent after its tool calls and with the person's
-prompts, as context the person does not see:
+prompts, as context the person does not see; a subagent's are described under
+[Subagents](#subagents):
 
 - Once 25,000 tokens of context have been added since the note last changed,
   a reminder asks the agent to update the note, and repeats after every
@@ -96,13 +99,33 @@ are kept after the note; when no turn fits, the person's latest request is
 copied into the note message verbatim. A note that is current is used as it
 is; a note that is missing or more than 10,000 tokens behind is rewritten
 first by a fork of the conversation, with any text passed to `/compact` given
-to it as what to keep or stress. Subagent compactions are left to Claude Code,
-and Claude Code's ahead-of-time compaction is skipped because the note is
-written when the compaction runs.
+to it as what to keep or stress. Claude Code's ahead-of-time compaction of the
+main conversation is skipped because the note is written when the compaction
+runs.
 
 When the fork gives no usable note, a note that exists is used as it is. If the
 bundle cannot be created, there is no note to use, or `okf` fails, the
 compaction runs as usual and a notice says why.
+
+## Subagents
+
+A subagent keeps a note of its own once its work runs long. Its context size
+is read from its own transcript, since Claude Code reports the main
+conversation's alone.
+
+- A subagent hears nothing about notes at first, so a short one is left as it
+  is. Once 25,000 tokens of context have been added since its first tool call,
+  its next tool result carries the instructions and its note id, and the
+  periodic reminders follow. It gets no urgent reminder, and `new_context` is
+  refused, because a subagent cannot start a fresh window.
+- `handoff_write`, `handoff_append` and `handoff_read` without a slug act on
+  the subagent's own note, so it cannot write the session's.
+  `context_remaining` reports the subagent's context.
+- Claude Code compacts a subagent as usual, ahead-of-time compaction included.
+  When the subagent has a note, one message after the summary tells it that the
+  note is there to read, without its content.
+- A subagent's note stays after it finishes, and `handoff_search` finds it.
+  The list of recent notes in the system prompt shows sessions' notes only.
 
 ## Original transcripts
 

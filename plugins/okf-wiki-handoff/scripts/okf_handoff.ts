@@ -16,6 +16,8 @@ import {
   BUNDLE_NAME,
   DEFAULT_REMIND_TOKENS,
   MARKER,
+  NOTE_SLUG_PATTERN,
+  agentConcept,
   errorText,
   handoffFolder,
   isRecord,
@@ -24,6 +26,8 @@ import {
 } from '../lib/core/common.ts'
 import { HISTORY_TOOLS, isHistoryTool, runHistoryTool } from '../lib/core/history.ts'
 import type { Locator } from '../lib/core/history.ts'
+import { latestUsage, parseItems } from '../lib/core/transcript.ts'
+import type { Usage } from '../lib/core/transcript.ts'
 import {
   MAX_SEARCH_RESULTS,
   NOTE_CONTENT,
@@ -33,23 +37,22 @@ import {
   readNote,
   recentNotes,
   searchNotesText,
+  utcMinute,
   writeNote,
 } from '../lib/core/notes.ts'
 import type { DirEntry, Host, RecentNote, Store } from '../lib/core/notes.ts'
 
-const VERSION = '0.3.0'
+const VERSION = '0.4.0'
 const SERVER_NAME = 'okf-handoff'
 const GENERATED_BY = 'process:okf-wiki-handoff'
 const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context compaction.'
-const NOTE_PATTERN = /^handoff\/[A-Za-z0-9-]+\/[a-z0-9][a-z0-9-]{0,63}$/
+const SESSION_NOTE_PATTERN = /^handoff\/[A-Za-z0-9-]+\/[a-z0-9][a-z0-9-]{0,63}$/
 const SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
 const OKF_TIMEOUT_MS = 30_000
 const USAGE_TAIL_BYTES = 1_000_000
 const USAGE_WIDE_TAIL_BYTES = 16_000_000
 const MAX_INJECTED_NOTE_CHARS = 20_000
-
-type Usage = { id: string; tokens: number }
 
 /** What the hooks remember about a session between events, in the plugin data directory. */
 type State = {
@@ -60,6 +63,8 @@ type State = {
   note_tokens?: number | null
   reminded_tokens?: number | null
   compaction_marker?: string
+  /** A subagent's compaction it was already told its note is there after. */
+  noticed_marker?: string
   stale_usage?: string | null
 }
 
@@ -284,59 +289,27 @@ async function tailItems(path: string, limit: number): Promise<Record<string, un
   } catch {
     return []
   }
-  const items: Record<string, unknown>[] = []
-  for (const line of raw.toString('utf8').split('\n')) {
-    try {
-      const item: unknown = JSON.parse(line)
-      if (isRecord(item)) {
-        items.push(item)
-      }
-    } catch {
-      // Not a whole JSON line.
-    }
-  }
 
-  return items
+  return parseItems(raw.toString('utf8').split('\n'))
 }
 
-/** The newest context size the transcript reports: Claude Code's last main-chain assistant usage, or Codex's last token count. */
-function latestUsage(items: readonly Record<string, unknown>[]): Usage | undefined {
-  for (const item of [...items].reverse()) {
-    const message = item.message
-    if (item.type === 'assistant' && isRecord(message) && !item.isSidechain) {
-      const usage = message.usage
-      if (!isRecord(usage)) {
-        continue
-      }
-      const tokens = ['input_tokens', 'cache_creation_input_tokens', 'cache_read_input_tokens', 'output_tokens']
-        .map(key => usage[key])
-        .reduce<number>((total, count) => total + (Number.isInteger(count) ? (count as number) : 0), 0)
-      if (tokens > 0) {
-        return { id: String(item.uuid || item.timestamp || ''), tokens }
-      }
-      continue
-    }
-    const payload = item.payload
-    if (item.type === 'event_msg' && isRecord(payload) && payload.type === 'token_count') {
-      const info = payload.info
-      const last = isRecord(info) ? info.last_token_usage : undefined
-      const tokens = isRecord(last) ? last.total_tokens : undefined
-      if (typeof tokens === 'number' && Number.isInteger(tokens) && tokens > 0) {
-        return { id: `${item.timestamp}#${item.ordinal}`, tokens }
-      }
-    }
-  }
-
-  return undefined
-}
-
-async function transcriptUsage(path: unknown): Promise<Usage | undefined> {
+async function transcriptUsage(path: unknown, isAgent = false): Promise<Usage | undefined> {
   if (typeof path !== 'string' || path === '') {
     return undefined
   }
   const file = expandHome(path)
 
-  return latestUsage(await tailItems(file, USAGE_TAIL_BYTES)) ?? latestUsage(await tailItems(file, USAGE_WIDE_TAIL_BYTES))
+  return (
+    latestUsage(await tailItems(file, USAGE_TAIL_BYTES), isAgent) ??
+    latestUsage(await tailItems(file, USAGE_WIDE_TAIL_BYTES), isAgent)
+  )
+}
+
+/** A subagent's transcript, which Claude Code keeps beside the session's, whose path its hooks are given. */
+function agentTranscriptPath(payload: Record<string, unknown>, sessionId: string, agentId: string): string {
+  const transcript = typeof payload.transcript_path === 'string' ? expandHome(payload.transcript_path) : ''
+
+  return transcript === '' ? '' : join(dirname(transcript), sessionId, 'subagents', `agent-${agentId}.jsonl`)
 }
 
 /** Identifies the newest compaction recorded in the transcript: Claude Code's compact boundary or Codex's compacted item. */
@@ -358,13 +331,18 @@ async function compactionMarker(transcript: string): Promise<string | undefined>
 // ---------------------------------------------------------------------------
 // Session state
 
-function statePath(dataDir: string, sessionId: string): string {
-  return join(dataDir, 'sessions', `${sessionId}.json`)
+/** Whose state: a session's main agent, or one of its subagents. */
+type Owner = { sessionId: string; agentId?: string }
+
+function statePath(dataDir: string, owner: Owner): string {
+  return owner.agentId === undefined
+    ? join(dataDir, 'sessions', `${owner.sessionId}.json`)
+    : join(dataDir, 'sessions', owner.sessionId, `agent-${owner.agentId}.json`)
 }
 
-async function loadState(dataDir: string, sessionId: string): Promise<State> {
+async function loadState(dataDir: string, owner: Owner): Promise<State> {
   try {
-    const state: unknown = JSON.parse(await readFile(statePath(dataDir, sessionId), 'utf8'))
+    const state: unknown = JSON.parse(await readFile(statePath(dataDir, owner), 'utf8'))
 
     return isRecord(state) ? (state as State) : {}
   } catch {
@@ -372,8 +350,8 @@ async function loadState(dataDir: string, sessionId: string): Promise<State> {
   }
 }
 
-async function saveState(dataDir: string, sessionId: string, state: State): Promise<void> {
-  const path = statePath(dataDir, sessionId)
+async function saveState(dataDir: string, owner: Owner, state: State): Promise<void> {
+  const path = statePath(dataDir, owner)
   await mkdir(dirname(path), { recursive: true })
   const temporary = `${path}.${process.pid}.tmp`
   await writeFile(temporary, JSON.stringify(state), 'utf8')
@@ -391,7 +369,7 @@ async function noteMtime(store: Store, concept: string): Promise<number | null> 
  * Updates the state from the transcript and the note file and returns the
  * current context size, or `undefined` while only pre-compaction usage is known.
  */
-async function observe(state: State, store: Store, usage: Usage | undefined): Promise<number | undefined> {
+async function observe(state: State, store: Store, usage: Usage | undefined, isAgent = false): Promise<number | undefined> {
   let tokens = usage?.tokens
   if (usage !== undefined && usage.id !== '' && usage.id === state.stale_usage) {
     tokens = undefined
@@ -405,8 +383,9 @@ async function observe(state: State, store: Store, usage: Usage | undefined): Pr
   }
   if ((state.note_tokens ?? null) === null && tokens !== undefined) {
     // A fresh or just-compacted context starts even with its note; a session
-    // first seen mid-way without a note has written none of its work down.
-    const rebase = state.rebase === true || modified !== null
+    // first seen mid-way without a note has written none of its work down. A
+    // subagent is first seen at its first tool call, holding only its task.
+    const rebase = isAgent || state.rebase === true || modified !== null
     delete state.rebase
     state.note_tokens = rebase ? tokens : 0
   }
@@ -427,6 +406,19 @@ Keep the note current without being asked, with the tools of the \`${SERVER_NAME
 - \`history_list\`, \`history_search\` and \`history_read\` list, search and read the original messages of this project's sessions and their subagents, compacted or not. When the note or a summary lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
 
 Write the note in the language of the conversation. ${NOTE_CONTENT} You do not need to tell the person each time you update the note.`
+}
+
+/** Given to a subagent once its work runs long or its context is compacted, never at its start. */
+function agentGuidance(options: { concept: string; sessionConcept: string; root: string; sessionId: string; agentId: string }): string {
+  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context compaction: after a compaction your conversation survives only as a summary and in your transcript, and you are told the note is there to read. The main agent keeps its own note, \`${options.sessionConcept}\`, which you may read but never write.
+
+Keep your note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${options.concept}". If those tools are not loaded yet, load them with tool search first.
+- \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step.
+- \`handoff_write\` replaces the whole note. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.
+- \`handoff_read\` reads a note of this project, and \`handoff_search\` finds the project's notes that mention a text.
+- \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages, and \`history_search\` finds messages that contain a text. When the note or a summary lacks a detail you need, look it up there instead of guessing.
+
+Write the note in the language of your task. Your task is what the agent that started you asked for. ${NOTE_CONTENT} Your final answer still goes to the agent that started you, as usual.`
 }
 
 function recentNotesText(notes: readonly RecentNote[]): string {
@@ -454,6 +446,14 @@ async function compactedText(store: Store, concept: string): Promise<string> {
   return `${text}\n\nThe conversation before the compaction is still in this session's transcript. When a detail you need is missing, find it with \`history_search\` or read it with \`history_read\` instead of guessing.`
 }
 
+/**
+ * What a subagent is told after its compaction: that its note is there to
+ * read, not the note itself, which would repeat much of the summary.
+ */
+function agentCompactedNotice(concept: string, modifiedMs: number): string {
+  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${concept}\`, last updated ${utcMinute(modifiedMs)}. Read it with \`handoff_read\` and note="${concept}" before you continue, when the summary leaves out something you need; load the \`${SERVER_NAME}\` tools with tool search first if they are not loaded.`
+}
+
 /** A nudge once `interval` tokens of work have passed since the note last changed, repeated after every further interval. */
 function reminder(concept: string, tokens: number, state: State, interval: number): string | undefined {
   const since = tokens - (state.note_tokens ?? 0)
@@ -474,7 +474,7 @@ function hookContext(event: string, text: string): HookOutput {
 }
 
 function sessionNote(payload: Record<string, unknown>, state: State, sessionId: string): string {
-  if (typeof state.note === 'string' && NOTE_PATTERN.test(state.note)) {
+  if (typeof state.note === 'string' && SESSION_NOTE_PATTERN.test(state.note)) {
     return state.note
   }
   const project = process.env.CLAUDE_PROJECT_DIR || (typeof payload.cwd === 'string' && payload.cwd) || process.cwd()
@@ -508,13 +508,12 @@ async function onSessionStart(payload: Record<string, unknown>, state: State, st
  * that the compaction was already seen.
  */
 async function resetAfterCompaction(
-  payload: Record<string, unknown>,
+  transcript: string,
   state: State,
   store: Store,
   concept: string,
   usage: Usage | undefined,
 ): Promise<void> {
-  const transcript = typeof payload.transcript_path === 'string' ? payload.transcript_path : ''
   if (transcript === '' || !(await isFile(transcript))) {
     return
   }
@@ -532,33 +531,104 @@ async function resetAfterCompaction(
   state.rebase = true
 }
 
+/**
+ * A subagent's hook. Its note stays unmentioned until its work runs long, so a
+ * short subagent is left as it is, and the CLI compacts it as usual: afterwards
+ * it is only told that its note is there.
+ *
+ * Both CLIs give a subagent's hooks `agent_id` and the session's `session_id`.
+ * Claude Code's `transcript_path` is the session's, beside which the
+ * subagent's transcript lies; Codex's is the subagent's own rollout.
+ */
+async function runAgentHook(
+  dataDir: string,
+  payload: Record<string, unknown>,
+  sessionId: string,
+  agentId: string,
+  host: 'claude' | 'codex',
+): Promise<HookOutput> {
+  const event = payload.hook_event_name
+  const isCompactStart = event === 'SessionStart' && payload.source === 'compact'
+  // Codex runs no SessionStart for a subagent, but gives its later inputs UserPromptSubmit.
+  const isTurnPoint = event === 'PostToolUse' || event === 'UserPromptSubmit'
+  if (!isCompactStart && !isTurnPoint && event !== 'PostCompact') {
+    return {}
+  }
+  const store = storeAt(bundleRoot(host))
+  const owner: Owner = { sessionId, agentId }
+  const state = await loadState(dataDir, owner)
+  const sessionConcept = sessionNote(payload, await loadState(dataDir, { sessionId }), sessionId)
+  const concept = agentConcept(sessionConcept, agentId)
+  state.note = concept
+  const transcript =
+    host === 'claude'
+      ? agentTranscriptPath(payload, sessionId, agentId)
+      : typeof payload.transcript_path === 'string'
+        ? expandHome(payload.transcript_path)
+        : ''
+  const usage = await transcriptUsage(transcript, true)
+  const messages: string[] = []
+  // A compaction whose own hooks could not tell the subagent, as Codex's never can, is found in the transcript.
+  const marker = transcript === '' ? undefined : await compactionMarker(transcript)
+  if (event === 'PostCompact' || isCompactStart || (marker !== undefined && marker !== state.compaction_marker)) {
+    await resetAfterCompaction(transcript, state, store, concept, usage)
+  }
+  if (event !== 'PostCompact' && marker !== undefined && marker !== state.noticed_marker) {
+    state.noticed_marker = marker
+    const modifiedMs = await store.host.mtimeMs(notePath(store, concept))
+    if (modifiedMs !== undefined) {
+      messages.push(agentCompactedNotice(concept, modifiedMs))
+    }
+  }
+  const tokens = await observe(state, store, usage, true)
+  if (isTurnPoint && tokens !== undefined) {
+    const message = reminder(concept, tokens, state, remindTokens())
+    if (message !== undefined && state.guided !== true) {
+      state.guided = true
+      messages.push(agentGuidance({ concept, sessionConcept, root: store.root, sessionId, agentId }))
+    } else if (message !== undefined) {
+      messages.push(message)
+    }
+  }
+  await saveState(dataDir, owner, state)
+
+  return messages.length === 0 || event === 'PostCompact' ? {} : hookContext(String(event), messages.join('\n\n'))
+}
+
 async function runHook(dataDir: string, input: string): Promise<HookOutput> {
   const payload: unknown = JSON.parse(input)
-  if (!isRecord(payload) || payload.agent_id) {
+  if (!isRecord(payload)) {
     return {}
   }
   const sessionId = String(payload.session_id ?? '')
   if (!SESSION_PATTERN.test(sessionId)) {
     return {}
   }
+  if (payload.agent_id) {
+    const agentId = String(payload.agent_id)
+
+    return SESSION_PATTERN.test(agentId) ? await runAgentHook(dataDir, payload, sessionId, agentId, hostName()) : {}
+  }
   const event = payload.hook_event_name
   const store = storeAt(bundleRoot(hostName()))
-  const state = await loadState(dataDir, sessionId)
+  const owner: Owner = { sessionId }
+  const state = await loadState(dataDir, owner)
   const concept = sessionNote(payload, state, sessionId)
   state.note = concept
-  const usage = await transcriptUsage(payload.transcript_path)
+  const transcript = typeof payload.transcript_path === 'string' ? payload.transcript_path : ''
+  const usage = await transcriptUsage(transcript)
   let output: HookOutput = {}
   if (event === 'SessionStart') {
     if ((await onPath('okf')) === undefined) {
       return { systemMessage: 'okf-wiki-handoff: the okf command is not on PATH, so no handoff note is kept.' }
     }
     if (payload.source === 'compact') {
-      await resetAfterCompaction(payload, state, store, concept, usage)
+      await resetAfterCompaction(transcript, state, store, concept, usage)
     }
     output = await onSessionStart(payload, state, store, concept)
     await observe(state, store, usage)
   } else if (event === 'PostCompact') {
-    await resetAfterCompaction(payload, state, store, concept, usage)
+    await resetAfterCompaction(transcript, state, store, concept, usage)
   } else if (event === 'UserPromptSubmit' || event === 'PostToolUse') {
     const tokens = await observe(state, store, usage)
     let message = tokens === undefined ? undefined : reminder(concept, tokens, state, remindTokens())
@@ -571,7 +641,7 @@ async function runHook(dataDir: string, input: string): Promise<HookOutput> {
       output = hookContext(event, message)
     }
   }
-  await saveState(dataDir, sessionId, state)
+  await saveState(dataDir, owner, state)
 
   return output
 }
@@ -595,7 +665,7 @@ async function logError(dataDir: string, error: unknown): Promise<void> {
 
 const NOTE_PROPERTY = {
   type: 'string',
-  description: "This session's handoff note concept id, as the session's okf-wiki-handoff instructions give it.",
+  description: "Your handoff note's concept id, as your okf-wiki-handoff instructions give it: the session's, or a subagent's own.",
 }
 
 function withNote(properties: Record<string, unknown>, required: readonly string[]): Record<string, unknown> {
@@ -613,19 +683,19 @@ const TOOLS = [
   {
     name: 'handoff_read',
     description:
-      "Read this session's okf-wiki-handoff note, or another note of this project: pass that note's concept id as note.",
+      "Read your okf-wiki-handoff note, or another note of this project: pass that note's concept id as note.",
     inputSchema: withNote({}, []),
   },
   {
     name: 'handoff_write',
     description:
-      "Replace the whole content of this session's okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout.",
+      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout.",
     inputSchema: withNote({ body: { type: 'string', description: 'The whole note in Markdown.' }, title: TITLE_PROPERTY }, ['body']),
   },
   {
     name: 'handoff_append',
     description:
-      "Add text to the end of this session's okf-wiki-handoff note, creating it when it does not exist, without passing the rest of the note again.",
+      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist, without passing the rest of the note again.",
     inputSchema: withNote({ text: { type: 'string', description: 'The Markdown to add.' }, title: TITLE_PROPERTY }, ['text']),
   },
   {
@@ -647,15 +717,17 @@ const TOOLS = [
   })),
 ]
 
-/** The note a tool names, and the project folder and session it belongs to. */
-function checkedNote(input: Record<string, unknown>): { concept: string; folder: string; key: string; slug: string } {
+/** The note a tool names, and the project folder and session it belongs to, a subagent's note its session's. */
+function checkedNote(input: Record<string, unknown>): { concept: string; folder: string; key: string; sessionSlug: string } {
   const note = input.note
-  if (typeof note !== 'string' || !NOTE_PATTERN.test(note)) {
+  const match = typeof note === 'string' ? /^handoff\/([A-Za-z0-9-]+)\/(.+)$/.exec(note) : null
+  const key = match?.[1]
+  const slug = match?.[2]
+  if (typeof note !== 'string' || key === undefined || slug === undefined || !NOTE_SLUG_PATTERN.test(slug)) {
     throw new Error('Pass "note" as the handoff concept id, such as handoff/<project-key>/<session-id>.')
   }
-  const [, key = '', slug = ''] = note.split('/')
 
-  return { concept: note, folder: note.slice(0, note.lastIndexOf('/')), key, slug }
+  return { concept: note, folder: `handoff/${key}`, key, sessionSlug: slug.split('/')[0] ?? slug }
 }
 
 function requiredText(input: Record<string, unknown>, key: string, what: string): string {
@@ -707,8 +779,8 @@ async function callTool(server: Server, name: string, input: Record<string, unkn
   if (!isHistoryTool(name)) {
     return undefined
   }
-  const { folder, key, slug } = checkedNote(input)
-  const locator: Locator = { kind: server.host, root: transcriptRoot(server.host), key, sessionId: slug }
+  const { folder, key, sessionSlug } = checkedNote(input)
+  const locator: Locator = { kind: server.host, root: transcriptRoot(server.host), key, sessionId: sessionSlug }
 
   return await runHistoryTool(name, nodeHost, locator, input, sessionId => noteTitle(server.store, noteConcept(folder, sessionId)))
 }

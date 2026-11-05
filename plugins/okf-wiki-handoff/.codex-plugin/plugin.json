@@ -1,6 +1,6 @@
 {
   "name": "okf-wiki-handoff",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Keeps a per-session OKF handoff note current and brings it back after context compaction.",
   "author": {
     "name": "ryul99",
@@ -13,7 +13,7 @@
   "interface": {
     "displayName": "OKF Wiki Handoff",
     "shortDescription": "Keep a handoff note that survives compaction.",
-    "longDescription": "Prompts the agent to keep a per-session OKF handoff note current, reminds it as work accumulates, shows the note again after the context is compacted, and lets it search the notes and read the project's original transcripts, subagents included.",
+    "longDescription": "Prompts the agent to keep a per-session OKF handoff note current, reminds it as work accumulates, shows the note again after the context is compacted, gives long-running subagents notes of their own, and lets it search the notes and read the project's original transcripts, subagents included.",
     "developerName": "ryul99",
     "category": "Productivity",
     "capabilities": ["Write"],

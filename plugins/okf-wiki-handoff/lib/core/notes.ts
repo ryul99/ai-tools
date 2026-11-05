@@ -109,7 +109,7 @@ export async function writeNote(
   await okf(store, ['body', 'set', concept, '--if-match', current.identity], text === '' ? '' : `${text}\n`)
 }
 
-/** The project's most recently changed notes other than `exclude`, newest first. */
+/** The project's most recently changed session notes other than `exclude`, newest first; subagents' notes are left out. */
 export async function recentNotes(store: Store, folder: string, exclude: string): Promise<RecentNote[]> {
   if (!(await store.host.exists(`${store.root}/${folder}`))) {
     return []
@@ -121,7 +121,7 @@ export async function recentNotes(store: Store, folder: string, exclude: string)
   const notes: (RecentNote & { mtimeMs: number })[] = []
   for (const record of records) {
     const concept = isRecord(record) && typeof record.id === 'string' ? record.id : undefined
-    if (concept === undefined || !concept.startsWith(`${folder}/`) || concept === exclude) {
+    if (concept === undefined || !concept.startsWith(`${folder}/`) || concept.includes('/', folder.length + 1) || concept === exclude) {
       continue
     }
     const mtimeMs = await store.host.mtimeMs(notePath(store, concept))
