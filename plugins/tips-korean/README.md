@@ -1,9 +1,7 @@
 # Tips Korean
 
-`tips-korean` is an extensible collection of tips for Korean users, the Korean
-language, and Korea-related contexts. The host discovers each skill from its
-metadata and loads its full guidance only when that skill is relevant, leaving
-room for the plugin to grow without loading unrelated tips.
+`tips-korean` provides guidance for Korean users, the Korean language, and
+Korea-related contexts.
 
 ## Installation
 

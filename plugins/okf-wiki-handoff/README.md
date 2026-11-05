@@ -1,164 +1,79 @@
 # OKF Wiki Handoff
 
-This Codex and Claude Code plugin has the agent keep a per-session handoff
-note in an OKF bundle and shows that note again after the context is
-compacted. Instead of changing what compaction produces, it keeps the note
-current while the work goes on, so the next context window can continue from
-the note and the summary, and it lets the agent search the notes and read the
-original transcripts of the project's sessions.
+Keeps session notes so Codex and Claude Code can continue work after context
+compaction. The agent can also find notes and search past conversations from
+the same project.
 
-For Claude Code, installing the plugin also installs its `okf-wiki`
-dependency:
+## Installation
 
-```sh
-claude plugin install okf-wiki-handoff@ryul99-ai-tools
-```
+First add the marketplace as described in the [installation guide](../../README.md#installation).
 
-For Codex, install both plugins, then open `/hooks` and trust the plugin hook
-definition:
+### Codex
+
+Install both plugins, then open `/hooks` and trust the plugin hook definition:
 
 ```sh
 codex plugin add okf-wiki@ryul99-ai-tools
 codex plugin add okf-wiki-handoff@ryul99-ai-tools
 ```
 
-The plugin needs Node.js 22.18 or newer, which runs its TypeScript directly,
-and `okf` 0.2.0 or newer. When `okf` is neither on `PATH` nor in uv's tool
-bin folder (`uv tool dir --bin`), the session start installs it with
-`uv tool install git+https://github.com/ryul99/okf-wiki.git` and says so. In
-Claude Code it also adds that folder to the `PATH` of the agent's shells
-through `CLAUDE_ENV_FILE`, so the `okf-wiki` skill finds `okf` too. If the
-install fails, for example without `uv` or network access, the session starts
-with a notice and no note is kept.
+### Claude Code
 
-## Where notes are stored
+```sh
+claude plugin install okf-wiki-handoff@ryul99-ai-tools
+```
 
-Each CLI keeps its notes in its own bundle under its configuration directory,
-creating it with `okf init` on first use:
+This also installs `okf-wiki`. Install either this plugin or
+[`okf-wiki-handoff-mod`](../okf-wiki-handoff-mod/README.md).
 
-| CLI | Bundle |
+### Requirements
+
+- Node.js 22.18 or newer.
+- `okf` 0.2.0 or newer. If missing, the plugin installs it at session start;
+  automatic installation requires `uv` and network access. If installation
+  fails, the session continues with a notice, but no note is kept.
+
+## Usage
+
+The plugin runs automatically. The agent records progress and decisions in
+its note, and receives that note alongside the CLI's summary after compaction.
+Long-running subagents keep separate notes.
+
+To resume earlier work or recover a detail, ask the agent, for example:
+
+```text
+Continue the task from this project's previous handoff notes.
+Find the exact command we ran in the previous session.
+```
+
+## Stored data
+
+Notes stay separate from your knowledge wiki:
+
+| CLI | Note bundle |
 | --- | --- |
 | Claude Code | `$CLAUDE_CONFIG_DIR/okf-handoff`, or `~/.claude/okf-handoff` |
 | Codex | `$CODEX_HOME/okf-handoff`, or `~/.codex/okf-handoff` |
 
-A note is the concept `handoff/<project-key>/<session-id>` with type
-`Handoff` and tag `autosave-handoff`. `<project-key>` names the project root
-the way Claude Code names its folders under `~/.claude/projects/`. A Claude
-Code subagent's note is `handoff/<project-key>/<session-id>/agent-<agent-id>`,
-beside its session's. `OKF_ROOT` does not affect where notes go. Read them
-with, for example, `okf --root ~/.claude/okf-handoff list handoff/<project-key>`.
+`OKF_ROOT` does not change this location. To inspect notes manually, use
+`okf --root ~/.claude/okf-handoff list` or the corresponding Codex path.
 
-## How the note is kept current
-
-1. At session start the hook tells the agent which note belongs to the
-   session and asks it to keep the note current. The note has no fixed
-   layout; the instructions list what it should usually hold, such as the
-   goal, the state of the work with exact paths and commands, the person's
-   rules and decisions, and the next steps. A new session also sees the five
-   most recent notes of other sessions in the same project, so it can pick up
-   one of them.
-2. The agent adds to the note with `handoff_append` as things happen and
-   rewrites it whole with `handoff_write` when it needs reorganizing. It reads
-   a note with `handoff_read` and finds the project's notes that mention a
-   text with `handoff_search`, which runs `okf search` over the bundle and
-   keeps the project's notes. All of them are served by the plugin's
-   `okf-handoff` MCP server and take the caller's note id as `note`. Writes
-   go through `okf new`, `okf meta set`, and `okf body set --if-match`.
-3. After a prompt or a tool call, once 25,000 tokens of context have been
-   added since the note last changed, the agent gets a one-line reminder to
-   update it. The reminder repeats after every further 25,000 tokens. The
-   context size is taken from the last main-agent request in the transcript:
-   Claude Code's assistant `usage`, or Codex's `token_count` event.
-
-A session that starts before the plugin is enabled gets the instructions with
-its first reminder. The plugin does not predict when compaction happens, so
-it never blocks the agent; how current the note is at a compaction depends on
-the agent following the instructions and reminders.
-
-## After a compaction
-
-When the context is compacted, automatic or manual, the new context gets the
-session instructions again and the note's content, next to the summary that
-the CLI writes, which is left as it is.
-
-## Subagents
-
-A subagent keeps a note of its own once its work runs long. In both CLIs its
-hooks carry `agent_id` and the session's `session_id`, and its context size is
-read from its own transcript:
-
-| CLI | Subagent's transcript |
-| --- | --- |
-| Claude Code | `<session-id>/subagents/agent-<agent-id>.jsonl` beside the session's, which `transcript_path` names |
-| Codex | its own rollout, which `transcript_path` names; `agent_id` is its thread id |
-
-- A subagent hears nothing about notes at first, so a short one is left as it
-  is. Once 25,000 tokens of context have been added since its first tool call,
-  its next tool result carries the instructions and its note id, and the
-  reminders follow as for the session. In Codex, an input the subagent is sent
-  later (`UserPromptSubmit`) carries them too. The instructions name the
-  session's note as one it may read but never write; the MCP server cannot
-  tell callers apart, so this rests on the instructions.
-- The CLI compacts a subagent as usual. Afterwards, when the subagent has a
-  note, it is told once that the note is there to read with `handoff_read`,
-  without its content. The notice comes with the subagent's next tool call
-  (or, in Codex, its next input) once its transcript shows the compaction:
-  neither CLI's compaction hooks can reach the subagent with it.
-- Claude Code runs a subagent's compaction hooks (`SessionStart` with source
-  `compact`, `PostCompact`) with the session's input and no `agent_id`. While
-  the session's last message is a tool call still waiting for its result, as
-  it is during a subagent's run, the session cannot be compacting, so those
-  hooks leave the session's note and reminders alone. A background subagent
-  compacted while the session is idle is still taken for the session.
-- A subagent's note stays after it finishes, and `handoff_search` finds it.
-  The list of recent notes at session start shows sessions' notes only.
-
-## Original transcripts
-
-The CLI's own transcripts keep every message, so the plugin reads them in
-place instead of archiving anything:
-
-| CLI | Sessions of a project | Subagents |
-| --- | --- | --- |
-| Claude Code | `projects/<project-key>/<session-id>.jsonl` under the configuration directory | `<session-id>/subagents/agent-<id>.jsonl` beside it |
-| Codex | the rollouts under `sessions/` whose `session_meta` names the project root as `cwd` | the rollouts whose `session_meta` names the session as `parent_thread_id` |
-
-The context windows of a transcript are split at its compactions: Claude
-Code's `compact_boundary` entries, or Codex's `compacted` items.
-
-| Tool | What it does |
-| --- | --- |
-| `history_list` | Lists the project's sessions, newest first, with their line, window and subagent counts, note title and first prompt; given `session`, lists that session's windows by line range and its subagents. |
-| `history_search` | Finds the messages that contain `query`, ignoring case, across the sessions and their subagents, or in one `session`. Each match gives the session, agent, window and line. |
-| `history_read` | Reads a `session`'s or a subagent's (`agent`) messages a page at a time, from `from_line`, from the start of a `window`, or from the start. |
-
-Tool calls are clipped in what these tools show, while a search matches their
-whole text. The transcripts last as long as the CLI keeps them; Claude Code
-deletes them after `cleanupPeriodDays`, 30 days by default.
+Past conversations are available only while the CLI retains their transcripts.
+Notes are working state; move durable conclusions into your wiki separately.
 
 ## Configuration
 
-- `OKF_HANDOFF_REMIND_TOKENS` sets how many tokens of context pass between
-  reminders, for example `40000` or `40k` (default `25000`).
-- `OKF_HANDOFF_CLI=claude|codex` overrides automatic host detection.
+- `OKF_HANDOFF_REMIND_TOKENS`: context tokens between reminders to update the
+  note (default `25000`; accepts values such as `40000` or `40k`).
+- `OKF_HANDOFF_CLI=claude|codex`: override automatic host detection.
 
-Hook errors never interrupt the session; they are appended to `errors.log` in
-the plugin data directory.
+## Limitations
 
-## Limits
-
-- The plugin cannot start a fresh context window by itself. The note is
-  shown next to the CLI's own summary, not in place of it.
-- At a compaction the note can lag the work by up to one reminder interval;
-  `history_search` and `history_read` reach what it misses.
-- A subagent's note is not shown after its compaction, only pointed to, so the
-  subagent reads it only if it chooses to.
-- Notes are machine-owned working state. Move durable conclusions into curated
-  concepts manually.
-
-## Development
-
-`lib/core/` holds the note store, the transcript rendering and the history
-tools that `okf-wiki-handoff-mod` shares through its `hooks/core` link. It imports only
-its own files, so both Node and the mod engine can run it. A change there
-ships in both plugins, so bump both versions.
+- Notes depend on the agent keeping them current and may miss recent work.
+  The agent can search past conversations to recover details.
+- The plugin uses the CLI's normal compaction and cannot start a fresh
+  context on its own. The experimental mod offers that option for Claude Code.
+- After a subagent's compaction, it receives a pointer to its note and must
+  choose to read it.
+- Hook errors do not interrupt the session. Check `errors.log` in the plugin
+  data directory when troubleshooting.

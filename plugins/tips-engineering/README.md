@@ -1,7 +1,6 @@
 # Tips Engineering
 
-`tips-engineering` is an extensible collection of lazily loaded tips for
-software engineering workflows.
+`tips-engineering` provides guidance for software engineering workflows.
 
 ## Installation
 

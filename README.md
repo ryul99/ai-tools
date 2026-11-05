@@ -11,12 +11,12 @@ A small collection of plugins for Codex and Claude Code.
 | --- | --- | --- | --- |
 | `council` | Yes | Yes | Uses multiple model perspectives to evaluate and synthesize answers. |
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
-| `okf-wiki-handoff` | Yes | Yes | Keeps a per-session OKF handoff note current and shows it again after context compaction. |
+| [`okf-wiki-handoff`](plugins/okf-wiki-handoff/README.md) | Yes | Yes | Keeps session notes to help the agent continue after context compaction. |
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
 | `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
-| `okf-wiki-handoff-mod` | No | Yes (mod) | Experimental mod with Codex-style context management around an OKF handoff note. |
-| `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
-| `tips-engineering` | Yes | Yes | Provides lazily loaded tips for software engineering workflows. |
+| [`okf-wiki-handoff-mod`](plugins/okf-wiki-handoff-mod/README.md) | No | Yes (mod) | Experimental alternative that continues work in fresh contexts using session notes. |
+| [`tips-korean`](plugins/tips-korean/README.md) | Yes | Yes | Provides guidance for Korean users, the Korean language, and Korea-related contexts. |
+| [`tips-engineering`](plugins/tips-engineering/README.md) | Yes | Yes | Provides guidance for software engineering workflows. |
 
 ## Installation
 
@@ -32,9 +32,9 @@ codex plugin add tips-korean@ryul99-ai-tools
 codex plugin add tips-engineering@ryul99-ai-tools
 ```
 
-Codex does not infer the Claude-specific dependency metadata of the handoff
-plugin, so install `okf-wiki` alongside it. After installing a hook plugin,
-open `/hooks` in Codex and trust its hook definition before use.
+Install only the plugins you need. `okf-wiki-handoff` also requires `okf-wiki`.
+For `english-lecturer` and `okf-wiki-handoff`, open `/hooks` in Codex and
+trust the plugin hook definition before use. Both require Node.js 22.18 or newer.
 
 ### Claude Code
 
@@ -48,31 +48,23 @@ claude plugin install tips-korean@ryul99-ai-tools
 claude plugin install tips-engineering@ryul99-ai-tools
 ```
 
+Install only the plugins you need. `okf-wiki-handoff` also installs `okf-wiki`.
+The `english-lecturer` and `okf-wiki-handoff` hook plugins require Node.js
+22.18 or newer.
+
 The `english-lecturer` mod is an optional replacement for its hook plugin:
 
 ```sh
 claude plugin install english-lecturer-mod@ryul99-ai-tools
 ```
 
-The handoff mod is an alternative to `okf-wiki-handoff`, not a replacement for
-it. Where the hook plugin keeps a note current and shows it next to the CLI's
-compaction summary, the mod follows Codex's experimental context management:
-it reminds the model before the context runs out and lets it start a fresh
-context window that holds only the note, and it replaces compactions with the
-note too; see the [hook plugin README](plugins/okf-wiki-handoff/README.md)
-and the [mod README](plugins/okf-wiki-handoff-mod/README.md). Install only one
-of the two:
+Choose one handoff plugin: `okf-wiki-handoff` restores notes alongside the
+CLI's compaction summary; the experimental `okf-wiki-handoff-mod` uses notes
+in place of that summary and lets the agent continue in fresh contexts.
 
 ```sh
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
 ```
-
-The hook plugins `english-lecturer` and `okf-wiki-handoff` run their
-TypeScript with Node.js 22.18 or newer. Each one shares its core with its mod
-version: the mod's `hooks/core` links to the hook plugin's `lib/core/`, so a
-change there ships in both and bumps both versions.
-
-Install only the plugins you need. `okf-wiki` never installs a hook.
 
 ## Usage
 
@@ -85,10 +77,15 @@ Write this explanation in clear Korean.
 Investigate related GitHub issues and pull requests.
 ```
 
-The `okf-wiki` plugin expects the `okf` CLI to be installed. The handoff plugin
-and its mod install it with
-`uv tool install git+https://github.com/ryul99/okf-wiki.git` at session start
-when it is missing. Run it inside a wiki, provide the wiki root in your request, or set it once for your shell:
+The `okf-wiki` plugin requires the `okf` CLI:
+
+```sh
+uv tool install git+https://github.com/ryul99/okf-wiki.git
+```
+
+The handoff plugins install it automatically when missing; this requires
+`uv` and network access. For wiki tasks, run inside a wiki, provide the wiki
+root in your request, or set it for your shell:
 
 ```sh
 export OKF_ROOT=/path/to/wiki
