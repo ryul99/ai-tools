@@ -1,22 +1,16 @@
-export type PlannerContext = {
-  root: string | null
-  worklog_dir?: string | null
-  worklogs?: unknown
-  workspace?: unknown
-  planner_prompt?: string
-  schema?: unknown
-}
+import { isRecord } from './core/text.ts'
+import type { PlannerContext } from './core/worklog.ts'
 
-export type ApplyResult = { logged: string | null }
+export type ReadyContext = Extract<PlannerContext, { worklog_dir: string }>
 
 export type Plan = { worklog: unknown }
 
-export function forkPrompt(context: PlannerContext): string {
+export function forkPrompt(context: ReadyContext): string {
   const data = JSON.stringify({ workspace: context.workspace, worklogs: context.worklogs })
 
   return `This message comes from the okf-wiki-autosave-mod plugin, not from the user. Set the task above aside and answer only as the journaling planner described below.
 
-${context.planner_prompt ?? ''}
+${context.planner_prompt}
 Reply with one JSON object and nothing else: no prose and no code fence. The object must match this JSON Schema:
 ${JSON.stringify(context.schema)}
 
@@ -37,10 +31,7 @@ export function parsePlan(reply: string): Plan | undefined {
   } catch {
     return undefined
   }
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
-    return undefined
-  }
-  if (!('worklog' in value)) {
+  if (!isRecord(value) || !('worklog' in value)) {
     return undefined
   }
 

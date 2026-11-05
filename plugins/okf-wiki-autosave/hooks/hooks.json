@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_autosave.py\" --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_autosave.ts\" --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 120,
             "statusMessage": "Journaling work into the OKF worklog"
           }

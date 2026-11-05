@@ -26,8 +26,9 @@ Install autosave and its base-plugin dependency:
 claude plugin install okf-wiki-autosave@ryul99-ai-tools
 ```
 
-The hook requires `okf` 0.2.0 or newer (for `okf body`) and the host CLI
-(`codex` or `claude`) on `PATH`, an active matching subscription login, and
+The hook requires Node.js 22.18 or newer, which runs its TypeScript directly,
+`okf` 0.2.0 or newer (for `okf body`), and the host CLI (`codex` or `claude`)
+on `PATH`, an active matching subscription login, and
 either an OKF bundle in the current directory hierarchy or an `OKF_ROOT` value.
 
 ## Worklog journaling
@@ -133,3 +134,20 @@ Set `OKF_AUTOSAVE_CLAUDE_MODEL` to override the Claude model (default `sonnet`)
 or `OKF_AUTOSAVE_CODEX_MODEL` to select a Codex model (the Codex default is
 used when unset). `OKF_AUTOSAVE_CLI=claude|codex` overrides automatic host
 detection.
+
+## Development
+
+`lib/core/` holds the bundle discovery, worklog context, and plan application
+that `okf-wiki-autosave-mod` shares through its `hooks/core` link. It imports
+only its own files, so both Node and the mod engine can run it. A change there
+ships in both plugins, so bump both versions.
+
+An install copies the linked files into the mod, but the engine refuses an
+import that leaves the plugin folder, so a working copy of the mod loads only
+as a copy with the link resolved:
+
+```sh
+cp -RL plugins/okf-wiki-autosave-mod /tmp/okf-wiki-autosave-mod
+claude plugin validate /tmp/okf-wiki-autosave-mod
+claude --plugin-dir /tmp/okf-wiki-autosave-mod
+```
