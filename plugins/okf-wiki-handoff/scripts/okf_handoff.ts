@@ -47,7 +47,6 @@ import type { OkfCommand, OkfSetup } from '../lib/core/okf_cli.ts'
 const VERSION = '0.5.0'
 const SERVER_NAME = 'okf-handoff'
 const GENERATED_BY = 'process:okf-wiki-handoff'
-const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context compaction.'
 const SESSION_NOTE_PATTERN = /^handoff\/[A-Za-z0-9-]+\/[a-z0-9][a-z0-9-]{0,63}$/
 const SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
@@ -268,7 +267,7 @@ const nodeHost: Host = {
 }
 
 function storeAt(root: string): Store {
-  return { host: nodeHost, root, description: DESCRIPTION, generatedBy: GENERATED_BY }
+  return { host: nodeHost, root, generatedBy: GENERATED_BY }
 }
 
 // ---------------------------------------------------------------------------

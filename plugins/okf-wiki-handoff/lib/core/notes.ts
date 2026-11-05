@@ -24,7 +24,7 @@ export type Host = {
 }
 
 /** A handoff bundle and how the notes it creates describe themselves. */
-export type Store = { host: Host; root: string; description: string; generatedBy: string }
+export type Store = { host: Host; root: string; generatedBy: string }
 
 export type RecentNote = { concept: string; slug: string; title: string; modified: string }
 
@@ -89,8 +89,6 @@ export async function writeNote(
       HANDOFF_TYPE,
       '--title',
       options.title ?? `Handoff ${new Date().toISOString().slice(0, 10)}`,
-      '--description',
-      store.description,
       '--tag',
       HANDOFF_TAG,
       '--generated-by',

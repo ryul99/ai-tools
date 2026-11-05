@@ -61,7 +61,6 @@ import {
 
 const OKF_TIMEOUT_MS = 30_000
 const GENERATED_BY = `process:${PLUGIN}`
-const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context resets and compaction.'
 const DEFAULT_MARGIN_PERCENT = 5
 /** A note updated within this many tokens of work counts as current. */
 const FRESH_TOKENS = 10_000
@@ -275,7 +274,6 @@ async function handoffPlace($: EngineInterface, isCreating: boolean): Promise<Pl
   const store: Store = {
     host: engineHost($),
     root: `${await claudeDirectory($)}/${BUNDLE_NAME}`,
-    description: DESCRIPTION,
     generatedBy: GENERATED_BY,
   }
   if (!(await $.fs.exists(`${store.root}/index.md`))) {
