@@ -185,8 +185,8 @@ async function saveRecord($: EngineInterface, record: SessionRecord): Promise<vo
   await $.store.set(await sessionKey($), record)
 }
 
-async function noteConcept($: EngineInterface, place: Place): Promise<string> {
-  const slug = (await $.session.id()).toLowerCase().replace(/[^a-z0-9-]/g, '-')
+function noteConcept(place: Place, sessionId: string): string {
+  const slug = sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 
   return `${place.folder}/${slug}`
 }
@@ -355,13 +355,13 @@ function positiveNumber(raw: string | undefined, fallback: number): number {
 const runtime: {
   transcript: string | undefined
   limits: Limits | undefined
-  section: string | undefined
+  guidance: { sessionId: string; text: string } | undefined
   remindTokens: number
   marginPercent: number
 } = {
   transcript: undefined,
   limits: undefined,
-  section: undefined,
+  guidance: undefined,
   remindTokens: DEFAULT_REMIND_TOKENS,
   marginPercent: DEFAULT_MARGIN_PERCENT,
 }
@@ -375,6 +375,26 @@ async function refreshLimits($: EngineInterface): Promise<Limits> {
   }
 
   return runtime.limits
+}
+
+/**
+ * Built for the session id the prompt is composed under, the one the tools
+ * resolve the note by: `session.start` does not fire on `/clear`, and its id
+ * can differ from the transcript's after a reload.
+ */
+async function guidanceFor($: EngineInterface): Promise<string | undefined> {
+  const sessionId = await $.session.id()
+  if (runtime.guidance?.sessionId !== sessionId) {
+    const place = await handoffPlace($, true)
+    if (place === undefined) {
+      return undefined
+    }
+    const concept = noteConcept(place, sessionId)
+    const text = guidanceSection({ concept, root: place.root, recent: await recentNotes($, place, concept) })
+    runtime.guidance = { sessionId, text }
+  }
+
+  return runtime.guidance.text
 }
 
 /** The reminder due now, if any: an urgent one near compaction, else a periodic one. */
@@ -430,7 +450,7 @@ async function replaceWithHandoff(
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = await noteConcept($, place)
+  const concept = noteConcept(place, await $.session.id())
   const note = await readNote($, place, concept)
   const current = note === undefined ? '' : note.body.trim()
   const { context } = await $.session.usage()
@@ -527,7 +547,7 @@ async function readTool($: EngineInterface, input: Record<string, unknown>): Pro
   if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
     return 'Pass "handoff" as a slug from the list of recent notes.'
   }
-  const concept = slug === undefined ? await noteConcept($, place) : `${place.folder}/${slug}`
+  const concept = slug === undefined ? noteConcept(place, await $.session.id()) : `${place.folder}/${slug}`
   const note = await readNote($, place, concept)
   if (note === undefined) {
     return `${concept} has not been written yet.`
@@ -549,7 +569,7 @@ async function writeTool($: EngineInterface, input: Record<string, unknown>): Pr
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = await noteConcept($, place)
+  const concept = noteConcept(place, await $.session.id())
   await writeNote($, place, concept, { title, handoff: body, segments: await segmentsOf($, place, concept) })
   const { context } = await $.session.usage()
   await saveRecord($, {
@@ -582,7 +602,7 @@ async function recallTool($: EngineInterface, input: Record<string, unknown>): P
   if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
     return 'Pass "handoff" as a slug from the list of recent notes.'
   }
-  const concept = slug === undefined ? await noteConcept($, place) : `${place.folder}/${slug}`
+  const concept = slug === undefined ? noteConcept(place, await $.session.id()) : `${place.folder}/${slug}`
   const segments = await segmentsOf($, place, concept)
   const segment = segments[number - 1]
   if (segment === undefined) {
@@ -625,13 +645,8 @@ export const register: Register = on => {
         // A reset asked for by a process that exited before its turn ended is not carried over.
         await saveRecord($, { ...record, isResetPending: false })
       }
-      const place = await handoffPlace($, true)
-      if (place !== undefined) {
-        const concept = await noteConcept($, place)
-        runtime.section = guidanceSection({ concept, root: place.root, recent: await recentNotes($, place, concept) })
-      }
     } catch (error) {
-      $.ui.toast(`okf handoff: no handoff note this session: ${errorText(error)}`)
+      $.ui.toast(`okf handoff: the session record could not be read: ${errorText(error)}`)
     }
 
     return next(e)
@@ -639,10 +654,15 @@ export const register: Register = on => {
 
   on('prompt.compose', async ($, e, next) => {
     const result = await next(e)
+    const text = await guidanceFor($).catch((error: unknown) => {
+      $.ui.toast(`okf handoff: no handoff note this session: ${errorText(error)}`)
 
-    return runtime.section === undefined
+      return undefined
+    })
+
+    return text === undefined
       ? result
-      : { sections: [...result.sections, { id: SECTION_ID, text: runtime.section, scope: 'session' as const }] }
+      : { sections: [...result.sections, { id: SECTION_ID, text, scope: 'session' as const }] }
   })
 
   // Classic events carry the transcript path, which the archive points into.
