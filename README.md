@@ -11,11 +11,9 @@ A small collection of plugins for Codex and Claude Code.
 | --- | --- | --- | --- |
 | `council` | Yes | Yes | Uses multiple model perspectives to evaluate and synthesize answers. |
 | `okf-wiki` | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
-| `okf-wiki-autosave` | Yes | Yes | Optionally maintains shared OKF work documents after agent turns. |
 | `okf-wiki-handoff` | Yes | Yes | Keeps a per-session OKF handoff note current and shows it again after context compaction. |
 | `english-lecturer` | Yes | Yes | Corrects English prompts and provides brief language feedback. |
 | `english-lecturer-mod` | No | Yes (mod) | Experimental mod version of `english-lecturer`. |
-| `okf-wiki-autosave-mod` | No | Yes (mod) | Experimental mod version of `okf-wiki-autosave`. |
 | `okf-wiki-handoff-mod` | No | Yes (mod) | Experimental mod with Codex-style context management around an OKF handoff note. |
 | `tips-korean` | Yes | Yes | Provides lazily loaded tips for Korean users, the Korean language, and Korea-related contexts. |
 | `tips-engineering` | Yes | Yes | Provides lazily loaded tips for software engineering workflows. |
@@ -28,16 +26,15 @@ A small collection of plugins for Codex and Claude Code.
 codex plugin marketplace add ryul99/ai-tools
 codex plugin add council@ryul99-ai-tools
 codex plugin add okf-wiki@ryul99-ai-tools
-codex plugin add okf-wiki-autosave@ryul99-ai-tools
 codex plugin add okf-wiki-handoff@ryul99-ai-tools
 codex plugin add english-lecturer@ryul99-ai-tools
 codex plugin add tips-korean@ryul99-ai-tools
 codex plugin add tips-engineering@ryul99-ai-tools
 ```
 
-Codex does not infer the Claude-specific dependency metadata of the autosave
-and handoff plugins, so install `okf-wiki` alongside them. After installing a
-hook plugin, open `/hooks` in Codex and trust its hook definition before use.
+Codex does not infer the Claude-specific dependency metadata of the handoff
+plugin, so install `okf-wiki` alongside it. After installing a hook plugin,
+open `/hooks` in Codex and trust its hook definition before use.
 
 ### Claude Code
 
@@ -45,18 +42,16 @@ hook plugin, open `/hooks` in Codex and trust its hook definition before use.
 claude plugin marketplace add ryul99/ai-tools
 claude plugin install council@ryul99-ai-tools
 claude plugin install okf-wiki@ryul99-ai-tools
-claude plugin install okf-wiki-autosave@ryul99-ai-tools
 claude plugin install okf-wiki-handoff@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
 claude plugin install tips-korean@ryul99-ai-tools
 claude plugin install tips-engineering@ryul99-ai-tools
 ```
 
-The mod versions are optional replacements for the two hook plugins:
+The `english-lecturer` mod is an optional replacement for its hook plugin:
 
 ```sh
 claude plugin install english-lecturer-mod@ryul99-ai-tools
-claude plugin install okf-wiki-autosave-mod@ryul99-ai-tools
 ```
 
 The handoff mod is an alternative to `okf-wiki-handoff`, not a replacement for
@@ -72,15 +67,12 @@ of the two:
 claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
 ```
 
-The hook plugins `english-lecturer`, `okf-wiki-autosave`, and
-`okf-wiki-handoff` run their TypeScript with Node.js 22.18 or newer. Each one
-shares its core with its mod version: the mod's `hooks/core` links to the hook
-plugin's `lib/core/`, so a change there ships in both and bumps both versions.
+The hook plugins `english-lecturer` and `okf-wiki-handoff` run their
+TypeScript with Node.js 22.18 or newer. Each one shares its core with its mod
+version: the mod's `hooks/core` links to the hook plugin's `lib/core/`, so a
+change there ships in both and bumps both versions.
 
-Install only the plugins you need. `okf-wiki` never installs a hook. Install
-`okf-wiki-autosave` separately when automatic updates are wanted. In Claude
-Code it declares `okf-wiki` as a dependency, so installing the autosave plugin
-there is sufficient.
+Install only the plugins you need. `okf-wiki` never installs a hook.
 
 ## Usage
 
@@ -98,12 +90,6 @@ The `okf-wiki` plugin expects the `okf` CLI to be installed. Run it inside a wik
 ```sh
 export OKF_ROOT=/path/to/wiki
 ```
-
-The autosave plugin journals meaningful work into dedicated worklog concepts
-under the bundle-relative `worklog/` directory. It uses the active
-subscription login for the host that runs it (`codex` from Codex and `claude`
-from Claude Code), never writes outside the worklog directory, and never
-creates session documents.
 
 The `english-lecturer` plugin runs automatically for Codex and Claude Code
 prompts after installation. Codex also requires the `/hooks` trust approval

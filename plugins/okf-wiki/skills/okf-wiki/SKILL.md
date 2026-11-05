@@ -13,7 +13,7 @@ Use `okf` for structural, metadata, and body operations while keeping Markdown f
 - For bundle creation, concept authoring, body writes, frontmatter, and tags, read [references/authoring-workflow.md](references/authoring-workflow.md).
 - For sources, citations, verification, trust, and lifecycle state, read [references/provenance-lifecycle.md](references/provenance-lifecycle.md).
 - For validation, link checks, citation checks, diagnostics, and CI behavior, read [references/validation-diagnostics.md](references/validation-diagnostics.md).
-- For the optional Claude Code autosave companion, managed shared documents, and automatic update boundaries, read [references/autosave.md](references/autosave.md).
+- For the handoff notes the optional `okf-wiki-handoff` plugins keep in their own bundle, read [references/handoff.md](references/handoff.md).
 - Before moving any concept, read and follow [references/safe-move.md](references/safe-move.md) completely.
 
 Read only the references needed for the current request.

@@ -28,16 +28,6 @@
       "description": "Inspect, author, validate, and safely refactor Open Knowledge Format wikis with the okf CLI"
     },
     {
-      "name": "okf-wiki-autosave",
-      "source": "./plugins/okf-wiki-autosave",
-      "description": "Automatically journal meaningful work into a dedicated OKF worklog directory when an agent finishes a turn"
-    },
-    {
-      "name": "okf-wiki-autosave-mod",
-      "source": "./plugins/okf-wiki-autosave-mod",
-      "description": "Experimental Claude Code mod version of okf-wiki-autosave that journals in the background after each turn"
-    },
-    {
       "name": "okf-wiki-handoff",
       "source": "./plugins/okf-wiki-handoff",
       "description": "Keep a per-session OKF handoff note current and bring it back, with recallable archived originals, after context compaction"
