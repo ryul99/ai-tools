@@ -30,7 +30,7 @@ export type Segment = { at: string; transcript: string; from: number; to: number
 
 export type Plan = { title: string; handoff: string }
 
-export type RecentNote = { concept: string; title: string; modified: string }
+export type RecentNote = { slug: string; title: string; modified: string }
 
 export const PLAN_SCHEMA = {
   type: 'object',
@@ -62,7 +62,7 @@ export function guidanceSection(options: {
     options.recent.length === 0
       ? ''
       : `\n\nRecent handoff notes of other sessions in this project, which \`${toolId(TOOL.read)}\` reads by slug:\n${options.recent
-          .map(note => `- \`${note.concept}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
+          .map(note => `- \`${note.slug}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
           .join('\n')}\nWhen the person continues one of these tasks, read that note and carry what still holds into this session's note.`
 
   return `# Context management

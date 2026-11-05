@@ -293,7 +293,7 @@ async function recentNotes($: EngineInterface, place: Place, exclude: string): P
       continue
     }
     notes.push({
-      concept,
+      slug: concept.slice(place.folder.length + 1),
       title: isRecord(record) ? String(record.title ?? '') : '',
       modified: `${new Date(stat.mtimeMs).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
       mtimeMs: stat.mtimeMs,
@@ -303,7 +303,7 @@ async function recentNotes($: EngineInterface, place: Place, exclude: string): P
   return notes
     .sort((left, right) => right.mtimeMs - left.mtimeMs)
     .slice(0, MAX_RECENT_NOTES)
-    .map(({ concept, title, modified }) => ({ concept, title, modified }))
+    .map(({ slug, title, modified }) => ({ slug, title, modified }))
 }
 
 async function lineCount($: EngineInterface, path: string): Promise<number | undefined> {
