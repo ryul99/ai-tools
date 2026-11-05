@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 SERVER_NAME = "okf-handoff"
 MARKER = "[okf-wiki-handoff]"
 HANDOFF_DIR = "handoff"
@@ -30,8 +30,6 @@ HANDOFF_TYPE = "Handoff"
 BUNDLE_NAME = "okf-handoff"
 GENERATED_BY = "process:okf-wiki-handoff"
 DESCRIPTION = "Handoff note an agent keeps current so its session survives context compaction."
-ARCHIVE_HEADING = "# Archived segments"
-ARCHIVE_PATTERN = re.compile(r"(?m)^# Archived segments[ \t]*$")
 NOTE_PATTERN = re.compile(r"^handoff/[A-Za-z0-9-]+/[a-z0-9][a-z0-9-]{0,63}$")
 SESSION_PATTERN = re.compile(r"^[A-Za-z0-9_-]{1,128}$")
 
@@ -145,31 +143,6 @@ def ensure_bundle(root: Path) -> None:
 # Notes
 
 
-def split_archive(body: str) -> str:
-    match = ARCHIVE_PATTERN.search(body)
-    return (body[: match.start()] if match else body).strip()
-
-
-def archive_section(note: str, segments: list[dict[str, Any]]) -> str:
-    lines = [
-        f"- #{index}: transcript lines {segment['from']}-{segment['to']}, archived {segment['at']}"
-        for index, segment in enumerate(segments, start=1)
-    ]
-    return (
-        f"{ARCHIVE_HEADING}\n\n"
-        "The original conversation is archived as the transcript line ranges in this note's\n"
-        f"`segments` frontmatter. Read a segment with the `recall` tool of the `{SERVER_NAME}`\n"
-        f'MCP server, passing note="{note}".\n\n' + "\n".join(lines) + "\n"
-    )
-
-
-def render_body(note: str, text: str, segments: list[dict[str, Any]]) -> str:
-    body = f"{text.strip()}\n" if text.strip() else ""
-    if not segments:
-        return body
-    return f"{body}\n{archive_section(note, segments)}" if body else archive_section(note, segments)
-
-
 def is_segment(value: Any) -> bool:
     return (
         isinstance(value, dict)
@@ -234,16 +207,15 @@ def write_note(
         create_note(root, note, title or f"Handoff {now_iso()[:10]}")
     elif title:
         run_okf(root, "meta", "set", note, "title", title)
-    if segments is None:
-        segments = note_segments(root, note)
-    else:
+    if segments is not None:
         run_okf(root, "meta", "set", note, "segments", json.dumps(segments), "--type", "json")
+    if text is None:
+        return
     current = read_note(root, note)
     if current is None:
         raise HandoffError(f"{note} disappeared while it was written")
-    body, identity = current
-    handoff = split_archive(body) if text is None else split_archive(text)
-    run_okf(root, "body", "set", note, "--if-match", identity, input_text=render_body(note, handoff, segments))
+    handoff = text.strip()
+    run_okf(root, "body", "set", note, "--if-match", current[1], input_text=f"{handoff}\n" if handoff else "")
 
 
 def note_title(root: Path, note: str) -> str:
@@ -510,7 +482,7 @@ def recent_notes_text(notes: list[dict[str, Any]]) -> str:
 
 def compacted_text(root: Path, note: str) -> str:
     current = read_note(root, note)
-    handoff = split_archive(current[0]) if current else ""
+    handoff = current[0].strip() if current else ""
     segments = note_segments(root, note)
     if handoff:
         if len(handoff) > MAX_INJECTED_NOTE_CHARS:
@@ -756,7 +728,7 @@ def tool_read(root: Path, arguments: dict[str, Any]) -> str:
     current = read_note(root, note)
     if current is None:
         return f"{note} has not been written yet."
-    handoff = split_archive(current[0])
+    handoff = current[0].strip()
     segments = note_segments(root, note)
     footer = (
         f"\n\n[{len(segments)} archived segments: read them with recall]" if segments else ""
@@ -769,7 +741,7 @@ def tool_read(root: Path, arguments: dict[str, Any]) -> str:
 def tool_write(root: Path, arguments: dict[str, Any]) -> str:
     note = checked_note(arguments)
     body = arguments.get("body")
-    if not isinstance(body, str) or not split_archive(body):
+    if not isinstance(body, str) or not body.strip():
         raise HandoffError('Pass "body" as the full note in Markdown.')
     title = arguments.get("title")
     write_note(root, note, body, title.strip() if isinstance(title, str) and title.strip() else None)

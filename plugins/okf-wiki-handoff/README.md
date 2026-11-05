@@ -67,8 +67,7 @@ the agent following the instructions and reminders.
 When the context is compacted, automatic or manual, the hook archives the
 conversation it replaced as a numbered segment of the note. A segment is a
 pointer, the transcript file and line range, kept in the note's `segments`
-frontmatter; the body's `# Archived segments` section lists them. The new
-context then gets the session instructions again, the note's content, and
+frontmatter. The new context then gets the session instructions again, the note's content, and
 how to recall the segments. The summary that the CLI writes is left as it is.
 
 The agent reads a segment back with the `recall` tool, which takes `note`,
