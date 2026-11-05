@@ -1,6 +1,6 @@
 {
   "name": "english-lecturer",
-  "version": "1.0.4",
+  "version": "1.1.0",
   "description": "Corrects English prompts and provides brief language feedback after submission.",
   "author": {
     "name": "ryul99",

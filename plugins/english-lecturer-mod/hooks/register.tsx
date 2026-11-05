@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptSubmitInput, Register } from 'claude-code'
 
 import type { LessonView } from '../types'
-import { lessonPrompt, parseLesson } from './lesson'
+import { lessonPrompt, parseLesson } from './core/lesson.ts'
 
 const COMMAND = 'english-lecturer'
 const ENABLED_KEY = 'enabled'
@@ -42,7 +42,7 @@ async function teach($: EngineInterface, text: string, ticket: number, model: st
   try {
     const reply = await $.model.complete({
       model,
-      prompt: lessonPrompt(text),
+      prompt: lessonPrompt(text, 'text'),
       effort: 'low',
       timeoutMs: LESSON_TIMEOUT_MS,
     })

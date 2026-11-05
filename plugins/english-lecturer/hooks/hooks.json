@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "${CLAUDE_PLUGIN_ROOT}/hooks/english-lecturer.sh",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/english_lecturer.ts\"",
             "timeout": 120,
             "statusMessage": "Reviewing English prompt"
           }
