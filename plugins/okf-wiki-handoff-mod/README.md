@@ -129,3 +129,18 @@ while the transcript file exists.
   explicitly, up to 8,000 characters.
 - Notes are machine-owned working state. Move durable conclusions into curated
   concepts manually.
+
+## Development
+
+`hooks/core` links to `../../okf-wiki-handoff/lib/core`, the note store and
+transcript rendering shared with the hook plugin. An install copies the linked
+files into the plugin, but the engine refuses an import that leaves the plugin
+folder, so a working copy loads only as a copy with the link resolved:
+
+```sh
+cp -RL plugins/okf-wiki-handoff-mod /tmp/okf-wiki-handoff-mod
+claude plugin validate /tmp/okf-wiki-handoff-mod
+claude --plugin-dir /tmp/okf-wiki-handoff-mod
+```
+
+A change to the shared core ships in both plugins, so bump both versions.

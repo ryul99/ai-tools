@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "okf-handoff": {
-      "command": "python3",
-      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py", "mcp", "--host", "claude"]
+      "command": "node",
+      "args": ["${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts", "mcp", "--host", "claude"]
     }
   }
 }

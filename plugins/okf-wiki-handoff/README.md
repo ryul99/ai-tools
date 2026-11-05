@@ -21,8 +21,9 @@ codex plugin add okf-wiki@ryul99-ai-tools
 codex plugin add okf-wiki-handoff@ryul99-ai-tools
 ```
 
-The plugin needs `python3` and `okf` 0.2.0 or newer on `PATH`. If `okf` is
-missing, the session starts with a notice and no note is kept.
+The plugin needs Node.js 22.18 or newer, which runs its TypeScript directly,
+and `okf` 0.2.0 or newer on `PATH`. If `okf` is missing, the session starts
+with a notice and no note is kept.
 
 ## Where notes are stored
 
@@ -92,3 +93,10 @@ the plugin data directory.
 - Subagents get no note; their hooks are ignored.
 - Notes are machine-owned working state. Move durable conclusions into curated
   concepts manually.
+
+## Development
+
+`lib/core/` holds the note store and transcript rendering that
+`okf-wiki-handoff-mod` shares through its `hooks/core` link. It imports only
+its own files, so both Node and the mod engine can run it. A change there
+ships in both plugins, so bump both versions.

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 30
           }
         ]
@@ -17,7 +17,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 30
           }
         ]
@@ -28,7 +28,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 30
           }
         ]
@@ -39,7 +39,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.py\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
+            "command": "node \"${CLAUDE_PLUGIN_ROOT}/scripts/okf_handoff.ts\" hook --data-dir \"${CLAUDE_PLUGIN_DATA}\"",
             "timeout": 60,
             "statusMessage": "Archiving the compacted conversation for the handoff note"
           }

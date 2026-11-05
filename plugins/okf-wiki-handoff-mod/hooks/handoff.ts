@@ -1,12 +1,10 @@
 import type { SessionMessage } from 'claude-code'
 
+import { MARKER, clip, isRecord } from './core/common.ts'
+import type { RecentNote } from './core/notes.ts'
+
 export const PLUGIN = 'okf-wiki-handoff-mod'
-export const HANDOFF_DIR = 'handoff'
-export const HANDOFF_TAG = 'autosave-handoff'
-export const HANDOFF_TYPE = 'Handoff'
-export const MARKER = '[okf-wiki-handoff]'
 export const SECTION_ID = `${PLUGIN}:handoff`
-export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
 
 /** The tools the mod registers, by their short names. */
 export const TOOL = {
@@ -23,14 +21,8 @@ export function toolId<Name extends string>(name: Name): `mcp__${typeof PLUGIN}_
 
 const TAIL_BUDGET_CHARS = 24_000
 const RECENT_RESULTS_CHARS = 8_000
-const TOOL_INPUT_CHARS = 2_000
-const TOOL_RESULT_CHARS = 4_000
-
-export type Segment = { at: string; transcript: string; from: number; to: number }
 
 export type Plan = { title: string; handoff: string }
-
-export type RecentNote = { slug: string; title: string; modified: string }
 
 export const PLAN_SCHEMA = {
   type: 'object',
@@ -193,11 +185,6 @@ export function recentToolResults(messages: readonly SessionMessage[]): string |
   return clip(text, RECENT_RESULTS_CHARS)
 }
 
-/** Names a project the way Claude Code names its folders under `projects/`. */
-export function projectKey(projectRoot: string): string {
-  return projectRoot.replace(/[^A-Za-z0-9]/g, '-')
-}
-
 export function handoffMessage(options: {
   root: string
   concept: string
@@ -255,101 +242,4 @@ export function remainingText(options: {
   const left = Math.max(options.compactAt - options.tokens, 0).toLocaleString('en-US')
 
   return `${used} Automatic compaction runs at ${options.compactAt.toLocaleString('en-US')} tokens, so about ${left} tokens remain.`
-}
-
-/**
- * Renders transcript JSONL lines as readable messages, stopping at a whole entry
- * once `maxChars` is reached so the reader can continue from `nextLine`.
- */
-export function renderEntries(
-  lines: readonly string[],
-  firstLine: number,
-  maxChars: number,
-): { text: string; nextLine: number | undefined } {
-  const parts: string[] = []
-  let used = 0
-  for (const [offset, line] of lines.entries()) {
-    const rendered = renderEntry(line)
-    if (rendered === undefined) {
-      continue
-    }
-    const part = `L${firstLine + offset} ${rendered}`
-    if (used > 0 && used + part.length > maxChars) {
-      return { text: parts.join('\n\n'), nextLine: firstLine + offset }
-    }
-    parts.push(clip(part, maxChars))
-    used += part.length
-  }
-
-  return { text: parts.join('\n\n'), nextLine: undefined }
-}
-
-function renderEntry(line: string): string | undefined {
-  let entry: unknown
-  try {
-    entry = JSON.parse(line)
-  } catch {
-    return undefined
-  }
-  if (!isRecord(entry) || (entry.type !== 'user' && entry.type !== 'assistant')) {
-    return undefined
-  }
-  const message = entry.message
-  if (!isRecord(message)) {
-    return undefined
-  }
-  const content = message.content
-  const blocks = Array.isArray(content) ? content : [content]
-  const text = blocks
-    .map(renderBlock)
-    .filter(part => part !== undefined && part !== '')
-    .join('\n')
-
-  return text === '' ? undefined : `${entry.type}: ${text}`
-}
-
-function renderBlock(block: unknown): string | undefined {
-  if (typeof block === 'string') {
-    return block
-  }
-  if (!isRecord(block)) {
-    return undefined
-  }
-  if (block.type === 'text') {
-    return typeof block.text === 'string' ? block.text : undefined
-  }
-  if (block.type === 'tool_use') {
-    const name = typeof block.name === 'string' ? block.name : 'tool'
-
-    return `[tool_use ${name}] ${clip(JSON.stringify(block.input ?? {}), TOOL_INPUT_CHARS)}`
-  }
-  if (block.type === 'tool_result') {
-    const label = block.is_error === true ? 'tool_result error' : 'tool_result'
-
-    return `[${label}] ${clip(resultText(block.content), TOOL_RESULT_CHARS)}`
-  }
-
-  return undefined
-}
-
-function resultText(content: unknown): string {
-  if (typeof content === 'string') {
-    return content
-  }
-  if (!Array.isArray(content)) {
-    return ''
-  }
-
-  return content
-    .map(item => (isRecord(item) && typeof item.text === 'string' ? item.text : ''))
-    .filter(text => text !== '')
-    .join('\n')
-}
-
-function clip(text: string, limit: number): string {
-  return text.length <= limit ? text : `${text.slice(0, limit)} [clipped]`
-}
-
-export function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value)
 }

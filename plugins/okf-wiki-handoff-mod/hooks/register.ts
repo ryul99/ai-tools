@@ -7,40 +7,40 @@ import type {
 } from 'claude-code'
 
 import {
+  BUNDLE_NAME,
+  DEFAULT_REMIND_TOKENS,
+  SLUG_PATTERN,
+  errorText,
+  handoffFolder,
+  isRecord,
+  noteConcept,
+  parsePositive,
+} from './core/common.ts'
+import { ensureBundle, nextSegment, noteText, readNote, recentNotes, segmentsOf, writeNote } from './core/notes.ts'
+import type { Host, Store } from './core/notes.ts'
+import { recallText } from './core/transcript.ts'
+import {
   CONTINUE_PROMPT,
-  HANDOFF_DIR,
-  HANDOFF_TAG,
-  HANDOFF_TYPE,
   PLUGIN,
   RESET_INSTRUCTIONS,
   SECTION_ID,
-  SLUG_PATTERN,
   TOOL,
   guidanceSection,
   handoffMessage,
-  isRecord,
   keptTail,
   latestPrompt,
   parsePlan,
   periodicReminder,
   plannerPrompt,
-  projectKey,
   recentToolResults,
   remainingText,
-  renderEntries,
   toolId,
   urgentReminder,
 } from './handoff'
-import type { RecentNote, Segment } from './handoff'
 
 const OKF_TIMEOUT_MS = 30_000
-const RECALL_CHUNK_LINES = 200
-const RECALL_MAX_CHARS = 30_000
 const GENERATED_BY = `process:${PLUGIN}`
 const DESCRIPTION = 'Handoff note an agent keeps current so its session survives context resets and compaction.'
-const BUNDLE_NAME = 'okf-handoff'
-const MAX_RECENT_NOTES = 5
-const DEFAULT_REMIND_TOKENS = 25_000
 const DEFAULT_MARGIN_PERCENT = 5
 /** A note updated within this many tokens of work counts as current. */
 const FRESH_TOKENS = 10_000
@@ -48,7 +48,7 @@ const RESET_ATTEMPTS = 50
 const RESET_RETRY_MS = 200
 
 /** The handoff bundle and this project's folder of handoff concepts in it. */
-type Place = { root: string; folder: string }
+type Place = { store: Store; folder: string }
 
 type SessionRecord = {
   /** The context size when the note last changed; absent until the next reading. */
@@ -130,20 +130,33 @@ const TOOLS = [
   },
 ]
 
-function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : String(error)
-}
+function engineHost($: EngineInterface): Host {
+  return {
+    async okf(args, stdin) {
+      const ran = await $.process.run(['okf', '--format', 'json', ...args], { stdin, timeoutMs: OKF_TIMEOUT_MS })
+      if (ran.exitCode !== 0) {
+        throw new Error(`okf ${args.join(' ')} failed: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+      }
 
-async function okf($: EngineInterface, args: readonly string[], stdin?: string): Promise<unknown> {
-  const ran = await $.process.run(['okf', '--format', 'json', ...args], {
-    stdin,
-    timeoutMs: OKF_TIMEOUT_MS,
-  })
-  if (ran.exitCode !== 0) {
-    throw new Error(`okf ${args.join(' ')} failed: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+      return ran.stdout.trim() === '' ? undefined : JSON.parse(ran.stdout)
+    },
+    exists: path => $.fs.exists(path),
+    mtimeMs: path => $.fs.stat(path).then(
+      stat => stat.mtimeMs,
+      () => undefined,
+    ),
+    async readLines(path, from, to) {
+      const ran = await $.process.run(['sed', '-n', `${from},${to}p;${to}q`, path], { timeoutMs: OKF_TIMEOUT_MS })
+      if (ran.exitCode !== 0) {
+        throw new Error(`cannot read ${path}: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`)
+      }
+      const lines = ran.stdout.split('\n')
+      // A truncated read ends mid-line, and the final newline leaves an empty piece.
+      lines.pop()
+
+      return lines
+    },
   }
-
-  return ran.stdout.trim() === '' ? undefined : JSON.parse(ran.stdout)
 }
 
 async function claudeDirectory($: EngineInterface): Promise<string> {
@@ -160,15 +173,20 @@ async function claudeDirectory($: EngineInterface): Promise<string> {
 }
 
 async function handoffPlace($: EngineInterface, isCreating: boolean): Promise<Place | undefined> {
-  const root = `${await claudeDirectory($)}/${BUNDLE_NAME}`
-  if (!(await $.fs.exists(`${root}/index.md`))) {
+  const store: Store = {
+    host: engineHost($),
+    root: `${await claudeDirectory($)}/${BUNDLE_NAME}`,
+    description: DESCRIPTION,
+    generatedBy: GENERATED_BY,
+  }
+  if (!(await $.fs.exists(`${store.root}/index.md`))) {
     if (!isCreating) {
       return undefined
     }
-    await okf($, ['--root', root, 'init'])
+    await ensureBundle(store)
   }
 
-  return { root, folder: `${HANDOFF_DIR}/${projectKey(await $.session.root())}` }
+  return { store, folder: handoffFolder(await $.session.root()) }
 }
 
 async function sessionKey($: EngineInterface): Promise<string> {
@@ -183,127 +201,6 @@ async function sessionRecord($: EngineInterface): Promise<SessionRecord> {
 
 async function saveRecord($: EngineInterface, record: SessionRecord): Promise<void> {
   await $.store.set(await sessionKey($), record)
-}
-
-function noteConcept(place: Place, sessionId: string): string {
-  const slug = sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')
-
-  return `${place.folder}/${slug}`
-}
-
-function isSegment(value: unknown): value is Segment {
-  if (!isRecord(value)) {
-    return false
-  }
-  const { at, transcript, from, to } = value
-
-  return (
-    typeof at === 'string' &&
-    typeof transcript === 'string' &&
-    typeof from === 'number' &&
-    typeof to === 'number'
-  )
-}
-
-async function segmentsOf($: EngineInterface, place: Place, concept: string): Promise<Segment[]> {
-  if (!(await $.fs.exists(`${place.root}/${concept}.md`))) {
-    return []
-  }
-  // `meta get` fails on a key that is not there yet, which is a note with no segments.
-  const stored = await okf($, ['--root', place.root, 'meta', 'get', concept, 'segments']).catch(
-    () => undefined,
-  )
-
-  return Array.isArray(stored) ? stored.filter(isSegment) : []
-}
-
-async function readNote(
-  $: EngineInterface,
-  place: Place,
-  concept: string,
-): Promise<{ body: string; identity: string } | undefined> {
-  if (!(await $.fs.exists(`${place.root}/${concept}.md`))) {
-    return undefined
-  }
-  const current = await okf($, ['--root', place.root, 'body', 'get', concept])
-  if (!isRecord(current) || typeof current.identity !== 'string') {
-    throw new Error(`okf body get ${concept} returned no identity`)
-  }
-
-  return { body: typeof current.body === 'string' ? current.body : '', identity: current.identity }
-}
-
-async function writeNote(
-  $: EngineInterface,
-  place: Place,
-  concept: string,
-  options: { title?: string; handoff: string; segments: readonly Segment[] },
-): Promise<void> {
-  const root = ['--root', place.root]
-  if (!(await $.fs.exists(`${place.root}/${concept}.md`))) {
-    await okf($, [
-      ...root,
-      'new',
-      concept,
-      '--type',
-      HANDOFF_TYPE,
-      '--title',
-      options.title ?? `Handoff ${new Date().toISOString().slice(0, 10)}`,
-      '--description',
-      DESCRIPTION,
-      '--tag',
-      HANDOFF_TAG,
-      '--generated-by',
-      GENERATED_BY,
-    ])
-  } else if (options.title !== undefined) {
-    await okf($, [...root, 'meta', 'set', concept, 'title', options.title])
-  }
-  if (options.segments.length > 0) {
-    await okf($, [...root, 'meta', 'set', concept, 'segments', JSON.stringify(options.segments), '--type', 'json'])
-  }
-  const current = await readNote($, place, concept)
-  if (current === undefined) {
-    throw new Error(`${concept} disappeared while it was written`)
-  }
-  const text = options.handoff.trim()
-  await okf(
-    $,
-    [...root, 'body', 'set', concept, '--if-match', current.identity],
-    text === '' ? '' : `${text}\n`,
-  )
-}
-
-async function recentNotes($: EngineInterface, place: Place, exclude: string): Promise<RecentNote[]> {
-  if (!(await $.fs.exists(`${place.root}/${place.folder}`))) {
-    return []
-  }
-  const records = await okf($, ['--root', place.root, 'list', place.folder, '--tag', HANDOFF_TAG])
-  if (!Array.isArray(records)) {
-    return []
-  }
-  const notes: (RecentNote & { mtimeMs: number })[] = []
-  for (const record of records) {
-    const concept = isRecord(record) && typeof record.id === 'string' ? record.id : undefined
-    if (concept === undefined || !concept.startsWith(`${place.folder}/`) || concept === exclude) {
-      continue
-    }
-    const stat = await $.fs.stat(`${place.root}/${concept}.md`).catch(() => undefined)
-    if (stat === undefined) {
-      continue
-    }
-    notes.push({
-      slug: concept.slice(place.folder.length + 1),
-      title: isRecord(record) ? String(record.title ?? '') : '',
-      modified: `${new Date(stat.mtimeMs).toISOString().slice(0, 16).replace('T', ' ')} UTC`,
-      mtimeMs: stat.mtimeMs,
-    })
-  }
-
-  return notes
-    .sort((left, right) => right.mtimeMs - left.mtimeMs)
-    .slice(0, MAX_RECENT_NOTES)
-    .map(({ slug, title, modified }) => ({ slug, title, modified }))
 }
 
 async function lineCount($: EngineInterface, path: string): Promise<number | undefined> {
@@ -338,17 +235,6 @@ async function transcriptPath(
   }
 
   return undefined
-}
-
-function positiveNumber(raw: string | undefined, fallback: number): number {
-  const match = /^\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmM]?)\s*$/.exec(raw ?? '')
-  if (match === null) {
-    return fallback
-  }
-  const scale = { '': 1, k: 1_000, m: 1_000_000 }[match[2]?.toLowerCase() ?? ''] ?? 1
-  const value = Number(match[1]) * scale
-
-  return value > 0 ? value : fallback
 }
 
 /** What the hooks share; a reload starts it over, while `$.store` keeps the session record. */
@@ -389,8 +275,9 @@ async function guidanceFor($: EngineInterface): Promise<string | undefined> {
     if (place === undefined) {
       return undefined
     }
-    const concept = noteConcept(place, sessionId)
-    const text = guidanceSection({ concept, root: place.root, recent: await recentNotes($, place, concept) })
+    const concept = noteConcept(place.folder, sessionId)
+    const recent = await recentNotes(place.store, place.folder, concept)
+    const text = guidanceSection({ concept, root: place.store.root, recent })
     runtime.guidance = { sessionId, text }
   }
 
@@ -450,8 +337,8 @@ async function replaceWithHandoff(
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = noteConcept(place, await $.session.id())
-  const note = await readNote($, place, concept)
+  const concept = noteConcept(place.folder, await $.session.id())
+  const note = await readNote(place.store, concept)
   const current = note === undefined ? '' : note.body.trim()
   const { context } = await $.session.usage()
   const since =
@@ -479,19 +366,22 @@ async function replaceWithHandoff(
     }
   }
 
-  const segments = await segmentsOf($, place, concept)
+  const segments = await segmentsOf(place.store, concept)
   const path = await transcriptPath($, runtime.transcript)
   const lastLine = path === undefined ? undefined : await lineCount($, path)
-  if (path !== undefined && lastLine !== undefined) {
-    const archived = segments
-      .filter(segment => segment.transcript === path)
-      .reduce((highest, segment) => Math.max(highest, segment.to), 0)
-    if (lastLine > archived) {
-      segments.push({ at: new Date().toISOString(), transcript: path, from: archived + 1, to: lastLine })
-    }
+  const segment =
+    path === undefined || lastLine === undefined
+      ? undefined
+      : nextSegment(segments, path, lastLine, new Date().toISOString())
+  if (segment !== undefined) {
+    segments.push(segment)
   }
 
-  await writeNote($, place, concept, { title, handoff, segments })
+  await writeNote(place.store, concept, {
+    title,
+    body: handoff,
+    segments: segment === undefined ? undefined : segments,
+  })
   const window = (record.window ?? 1) + 1
   await saveRecord($, {
     writes: (record.writes ?? 0) + (title === undefined ? 0 : 1),
@@ -500,7 +390,7 @@ async function replaceWithHandoff(
 
   const tail = isReset ? [] : keptTail(e.messages)
   const text = handoffMessage({
-    root: place.root,
+    root: place.store.root,
     concept,
     handoff,
     prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
@@ -538,24 +428,28 @@ async function resetContext($: EngineInterface): Promise<void> {
   await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
 }
 
+/** The note a tool names by its `handoff` slug, or this session's own; a string when the input is unusable. */
+async function namedConcept(
+  $: EngineInterface,
+  place: Place,
+  input: Record<string, unknown>,
+): Promise<{ concept: string } | string> {
+  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
+  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
+    return 'Pass "handoff" as a slug from the list of recent notes.'
+  }
+
+  return { concept: slug === undefined ? noteConcept(place.folder, await $.session.id()) : `${place.folder}/${slug}` }
+}
+
 async function readTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
   const place = await handoffPlace($, false)
   if (place === undefined) {
     return 'No handoff note has been written on this machine yet.'
   }
-  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
-  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
-    return 'Pass "handoff" as a slug from the list of recent notes.'
-  }
-  const concept = slug === undefined ? noteConcept(place, await $.session.id()) : `${place.folder}/${slug}`
-  const note = await readNote($, place, concept)
-  if (note === undefined) {
-    return `${concept} has not been written yet.`
-  }
-  const segments = await segmentsOf($, place, concept)
-  const footer = segments.length === 0 ? '' : `\n\n[${segments.length} archived segments: read them with recall]`
+  const named = await namedConcept($, place, input)
 
-  return `${concept}\n\n${note.body.trim() || '(empty)'}${footer}`
+  return typeof named === 'string' ? named : noteText(place.store, named.concept)
 }
 
 async function writeTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
@@ -569,8 +463,8 @@ async function writeTool($: EngineInterface, input: Record<string, unknown>): Pr
     throw new Error('the handoff bundle could not be created')
   }
   const record = await sessionRecord($)
-  const concept = noteConcept(place, await $.session.id())
-  await writeNote($, place, concept, { title, handoff: body, segments: await segmentsOf($, place, concept) })
+  const concept = noteConcept(place.folder, await $.session.id())
+  await writeNote(place.store, concept, { title, body })
   const { context } = await $.session.usage()
   await saveRecord($, {
     ...record,
@@ -598,37 +492,13 @@ async function recallTool($: EngineInterface, input: Record<string, unknown>): P
   if (place === undefined) {
     return 'No handoff note has been written on this machine yet.'
   }
-  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
-  if (slug !== undefined && !SLUG_PATTERN.test(slug)) {
-    return 'Pass "handoff" as a slug from the list of recent notes.'
+  const named = await namedConcept($, place, input)
+  if (typeof named === 'string') {
+    return named
   }
-  const concept = slug === undefined ? noteConcept(place, await $.session.id()) : `${place.folder}/${slug}`
-  const segments = await segmentsOf($, place, concept)
-  const segment = segments[number - 1]
-  if (segment === undefined) {
-    return `${concept} has ${segments.length} archived segments.`
-  }
-  const requested = typeof input.from_line === 'number' ? input.from_line : segment.from
-  const from = Math.min(Math.max(requested, segment.from), segment.to)
-  const to = Math.min(from + RECALL_CHUNK_LINES - 1, segment.to)
-  const ran = await $.process.run(['sed', '-n', `${from},${to}p;${to}q`, segment.transcript], {
-    timeoutMs: OKF_TIMEOUT_MS,
-  })
-  if (ran.exitCode !== 0) {
-    return `Cannot read the archived transcript: ${ran.stderr.trim() || `exit ${ran.exitCode}`}`
-  }
-  const lines = ran.stdout.split('\n')
-  // A truncated read ends mid-line, and the final newline leaves an empty piece.
-  lines.pop()
-  const rendered = renderEntries(lines, from, RECALL_MAX_CHARS)
-  const readUpTo = from + lines.length
-  const next = rendered.nextLine ?? (readUpTo <= segment.to ? readUpTo : undefined)
-  const footer =
-    next === undefined
-      ? `[end of segment #${number}]`
-      : `[segment #${number} continues: call recall again with from_line=${next}]`
+  const fromLine = typeof input.from_line === 'number' && Number.isInteger(input.from_line) ? input.from_line : undefined
 
-  return `Segment #${number} of ${concept}, archived ${segment.at}.\n\n${rendered.text}\n\n${footer}`
+  return recallText(place.store, named.concept, number, fromLine)
 }
 
 export const register: Register = on => {
@@ -636,8 +506,8 @@ export const register: Register = on => {
     for (const tool of TOOLS) {
       await $.tool.register({ ...tool, isDeferred: false })
     }
-    runtime.remindTokens = positiveNumber(await $.env.get('OKF_HANDOFF_REMIND_TOKENS'), DEFAULT_REMIND_TOKENS)
-    const margin = positiveNumber(await $.env.get('OKF_HANDOFF_MARGIN_PERCENT'), DEFAULT_MARGIN_PERCENT)
+    runtime.remindTokens = parsePositive(await $.env.get('OKF_HANDOFF_REMIND_TOKENS'), DEFAULT_REMIND_TOKENS)
+    const margin = parsePositive(await $.env.get('OKF_HANDOFF_MARGIN_PERCENT'), DEFAULT_MARGIN_PERCENT)
     runtime.marginPercent = margin < 100 ? margin : DEFAULT_MARGIN_PERCENT
     try {
       const record = await sessionRecord($)
