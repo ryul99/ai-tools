@@ -1,7 +1,7 @@
 import { clip, isRecord } from './common.ts'
 
-const TOOL_INPUT_CHARS = 2_000
-const TOOL_RESULT_CHARS = 4_000
+export const TOOL_INPUT_CHARS = 2_000
+export const TOOL_RESULT_CHARS = 4_000
 
 /** How much of a tool call's input and result a rendered entry keeps; a search matches against all of it. */
 export type Detail = 'brief' | 'full'
@@ -168,13 +168,14 @@ export function renderEntries(
   firstLine: number,
   maxChars: number,
   marks: ReadonlyMap<number, string> = new Map(),
+  detail: Detail = 'brief',
 ): { text: string; nextLine: number | undefined } {
   const parts: string[] = []
   let used = 0
   for (const [offset, line] of lines.entries()) {
     const number = firstLine + offset
     const mark = marks.get(number)
-    const rendered = renderEntry(line)
+    const rendered = renderEntry(line, detail)
     if (rendered === undefined && mark === undefined) {
       continue
     }

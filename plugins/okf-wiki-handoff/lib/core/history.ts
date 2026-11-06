@@ -1,7 +1,8 @@
 import { clip, isRecord, projectKey, sessionSlug } from './common.ts'
 import { utcMinute } from './notes.ts'
 import type { Host } from './notes.ts'
-import { renderEntries, renderEntry } from './transcript.ts'
+import { TOOL_INPUT_CHARS, TOOL_RESULT_CHARS, renderEntries, renderEntry } from './transcript.ts'
+import type { Detail } from './transcript.ts'
 
 export const READ_CHUNK_LINES = 200
 export const READ_MAX_CHARS = 30_000
@@ -342,8 +343,12 @@ ${results.join('\n')}${more}`
 export async function historyReadText(
   host: Host,
   locator: Locator,
-  options: { session?: string; agent?: string; window?: number; fromLine?: number },
+  options: { session?: string; agent?: string; fromLine?: number; toLine?: number; detail: Detail },
 ): Promise<string> {
+  const from = options.fromLine ?? 1
+  if (options.toLine !== undefined && options.toLine < from) {
+    return `Pass "to_line" at or after "from_line" (L${from}).`
+  }
   const named = options.session ?? locator.sessionId
   const session = (await projectSessions(host, locator)).find(candidate => sameSession(candidate.id, named))
   if (session === undefined) {
@@ -360,33 +365,22 @@ export async function historyReadText(
     label += `, agent \`${agent.id}\``
   }
   const total = await host.lineCount(path)
+  if (from > total) {
+    return `${READ_HEADER} ${label}: the transcript ends at L${total}.`
+  }
+  const last = Math.min(options.toLine ?? total, total)
   const starts = await windowStarts(host, locator.kind, path)
-  let first = 1
-  let last = total
-  let scope = 'transcript'
-  if (options.window !== undefined) {
-    const start = starts[options.window - 1]
-    if (start === undefined) {
-      return `${label} has ${starts.length} context windows.`
-    }
-    first = start
-    last = (starts[options.window] ?? total + 1) - 1
-    scope = `window #${options.window}`
-  }
-  const from = Math.max(options.fromLine ?? first, first)
-  if (from > last) {
-    return `${READ_HEADER} ${label}: the ${scope} ends at L${last}.`
-  }
   const lines = await host.readLines(path, from, Math.min(from + READ_CHUNK_LINES - 1, last))
   const marks = new Map(
     starts.map((start, index) => [start, `--- context window #${index + 1} starts ---`] as const),
   )
-  const rendered = renderEntries(lines, from, READ_MAX_CHARS, marks)
+  const rendered = renderEntries(lines, from, READ_MAX_CHARS, marks, options.detail)
   const readUpTo = from + lines.length
   const next = rendered.nextLine ?? (readUpTo <= last && lines.length > 0 ? readUpTo : undefined)
+  const scope = last === total ? 'the transcript' : `L${last}`
   const footer = next === undefined
-    ? `[end of the ${scope}]`
-    : `[the ${scope} continues: call history_read again with the same arguments and from_line=${next}]`
+    ? `[end of ${scope}]`
+    : `[continues to ${scope}: call history_read again with the same arguments and from_line=${next}]`
   const window = windowOf(starts, from)
 
   return `${READ_HEADER} ${label}, window #${window} of ${starts.length}, from L${from} of ${total}.
@@ -427,12 +421,17 @@ export const HISTORY_TOOLS = {
   },
   history_read: {
     description:
-      "Read the original messages of a session of this project, or of one of its subagents, a page at a time: from a line, from the start of a context window, or from the start of the transcript.",
+      "Read the original messages of a session of this project, or of one of its subagents, a page at a time, between two transcript lines: around a match history_search gave, or over a context window's lines from history_list.",
     properties: {
       session: SESSION_PROPERTY,
       agent: { type: 'string', description: "A subagent id from history_list or history_search, to read that subagent's transcript." },
-      window: { type: 'integer', minimum: 1, description: 'A context window number, to read only that window.' },
-      from_line: { type: 'integer', minimum: 1, description: 'The transcript line to start from, such as a match or a previous page gave.' },
+      from_line: { type: 'integer', minimum: 1, description: 'The transcript line to start from, such as a match or a previous page gave; the first line by default.' },
+      to_line: { type: 'integer', minimum: 1, description: 'The last transcript line to read, inclusive; the end of the transcript by default.' },
+      detail: {
+        type: 'string',
+        enum: ['brief', 'full'],
+        description: `"brief" (the default) cuts each tool call's input at ${TOOL_INPUT_CHARS.toLocaleString('en-US')} characters and its result at ${TOOL_RESULT_CHARS.toLocaleString('en-US')}; "full" keeps them whole, up to ${READ_MAX_CHARS.toLocaleString('en-US')} characters a message.`,
+      },
     },
     required: [] as string[],
   },
@@ -475,8 +474,9 @@ export function runHistoryTool(
       return historyReadText(host, locator, {
         session,
         agent: textInput(input, 'agent'),
-        window: countInput(input, 'window'),
         fromLine: countInput(input, 'from_line'),
+        toLine: countInput(input, 'to_line'),
+        detail: input.detail === 'full' ? 'full' : 'brief',
       })
   }
 }
