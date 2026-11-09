@@ -33,8 +33,9 @@ export const NOTE_CONTENT =
 const SEARCH_CANDIDATES = 500
 export const MAX_SEARCH_RESULTS = 50
 const MAX_LINES_PER_NOTE = 3
-// Every handoff note's id and type contain "handoff", so these matches cannot tell notes apart.
-const UNINFORMATIVE_FIELDS = new Set(['id', 'type'])
+// The heading already shows the title, and the other fields hold nearly the same text in every handoff note,
+// so a line for them would only take the place of a body line.
+const UNINFORMATIVE_FIELDS = new Set(['id', 'type', 'title', 'tags', 'description'])
 
 export function notePath(store: Store, concept: string): string {
   return `${store.root}/${concept}.md`
