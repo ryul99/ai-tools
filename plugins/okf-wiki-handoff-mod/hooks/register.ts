@@ -28,7 +28,6 @@ import {
   noteText,
   noteTitle,
   readNote,
-  recentNotes,
   searchNotesText,
   utcMinute,
   writeNote,
@@ -101,7 +100,7 @@ const NOTE_SCHEMA = {
   properties: {
     handoff: {
       type: 'string',
-      description: "A handoff slug of this project, from the session's list; omit it for this session's own note.",
+      description: "A handoff slug of this project, as handoff_search gives it; omit it for this session's own note.",
     },
   },
 }
@@ -155,7 +154,7 @@ const TOOLS = [
   {
     name: TOOL.write,
     description:
-      "Replace the whole of this session's handoff note, creating it when it does not exist. The note has no fixed layout.",
+      "Replace the whole of this session's handoff note, creating it when it does not exist. The note has no fixed layout. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.",
     inputSchema: WRITE_SCHEMA,
   },
   {
@@ -167,7 +166,7 @@ const TOOLS = [
   {
     name: TOOL.search,
     description:
-      'Find the handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds by its slug.',
+      "Find the handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds by its slug. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
     inputSchema: SEARCH_SCHEMA,
   },
   {
@@ -418,9 +417,7 @@ async function guidanceFor($: EngineInterface): Promise<string | undefined> {
     if (place === undefined) {
       return undefined
     }
-    const concept = noteConcept(place.folder, sessionId)
-    const recent = await recentNotes(place.store, place.folder, concept)
-    const text = guidanceSection({ concept, root: place.store.root, recent })
+    const text = guidanceSection({ concept: noteConcept(place.folder, sessionId), root: place.store.root })
     runtime.guidance = { sessionId, text }
   }
 
@@ -656,7 +653,7 @@ async function namedConcept(
 ): Promise<{ concept: string } | string> {
   const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
   if (slug !== undefined && !NOTE_SLUG_PATTERN.test(slug)) {
-    return 'Pass "handoff" as a slug from the list of recent notes.'
+    return 'Pass "handoff" as a slug that handoff_search gave.'
   }
 
   return { concept: slug === undefined ? await ownConcept($, place, agentId) : `${place.folder}/${slug}` }

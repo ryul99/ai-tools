@@ -35,12 +35,11 @@ import {
   noteText,
   noteTitle,
   readNote,
-  recentNotes,
   searchNotesText,
   utcMinute,
   writeNote,
 } from '../lib/core/notes.ts'
-import type { DirEntry, Host, RecentNote, Store } from '../lib/core/notes.ts'
+import type { DirEntry, Host, Store } from '../lib/core/notes.ts'
 import { ensureOkf, locateOkf, pathExport } from '../lib/core/okf_cli.ts'
 import type { OkfCommand, OkfSetup } from '../lib/core/okf_cli.ts'
 
@@ -405,9 +404,7 @@ function guidance(concept: string, root: string): string {
 
 Keep the note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${concept}". If those tools are not loaded yet, load them with tool search first.
 - \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step, a new rule from the person.
-- \`handoff_write\` replaces the whole note. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.
-- \`handoff_read\` reads the note or another note of this project, and \`handoff_search\` finds the project's notes that mention a text.
-- \`history_list\`, \`history_search\` and \`history_read\` list, search and read the original messages of this project's sessions and their subagents, compacted or not. They default to this session; pass session="all" to \`history_list\` or \`history_search\` to cover every session. When the note or a summary lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
+- \`handoff_write\`, \`handoff_read\` and \`handoff_search\` replace, read and search the notes, and \`history_list\`, \`history_search\` and \`history_read\` reach the original messages of this project's sessions and their subagents, compacted or not.
 
 Write the note in the language of the conversation. ${NOTE_CONTENT} You do not need to tell the person each time you update the note.`
 }
@@ -418,20 +415,10 @@ function agentGuidance(options: { concept: string; sessionConcept: string; root:
 
 Keep your note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${options.concept}". If those tools are not loaded yet, load them with tool search first.
 - \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step.
-- \`handoff_write\` replaces the whole note. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.
-- \`handoff_read\` reads a note of this project, and \`handoff_search\` finds the project's notes that mention a text.
-- \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages, and \`history_search\` finds messages that contain a text. When the note or a summary lacks a detail you need, look it up there instead of guessing.
+- \`handoff_write\` replaces the whole note.
+- \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages.
 
 Write the note in the language of your task. Your task is what the agent that started you asked for. ${NOTE_CONTENT} Your final answer still goes to the agent that started you, as usual.`
-}
-
-function recentNotesText(notes: readonly RecentNote[]): string {
-  if (notes.length === 0) {
-    return ''
-  }
-  const lines = notes.map(note => `- \`${note.concept}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
-
-  return `\n\nRecent handoff notes of other sessions in this project:\n${lines.join('\n')}\nWhen the person continues one of these tasks, or an older one you find with \`handoff_search\`, read that note with \`handoff_read\` and carry what still holds into this session's note.`
 }
 
 async function compactedText(store: Store, concept: string): Promise<string> {
@@ -496,8 +483,6 @@ async function onSessionStart(payload: Record<string, unknown>, state: State, st
   }
   if (source === 'compact') {
     text += await compactedText(store, concept)
-  } else if (isNew) {
-    text += recentNotesText(await recentNotes(store, concept.slice(0, concept.lastIndexOf('/')), concept))
   } else if (source === 'resume' && (await isFile(notePath(store, concept)))) {
     text += "\n\nThe note already exists from earlier in this session; read it with `handoff_read` when you need it."
   }
@@ -729,7 +714,7 @@ const TOOLS = [
   {
     name: 'handoff_write',
     description:
-      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout.",
+      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.",
     inputSchema: withNote({ body: { type: 'string', description: 'The whole note in Markdown.' }, title: TITLE_PROPERTY }, ['body']),
   },
   {
@@ -741,7 +726,7 @@ const TOOLS = [
   {
     name: 'handoff_search',
     description:
-      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds with handoff_read.",
+      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds with handoff_read. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
     inputSchema: withNote(
       {
         query: { type: 'string', description: 'The text to find.' },

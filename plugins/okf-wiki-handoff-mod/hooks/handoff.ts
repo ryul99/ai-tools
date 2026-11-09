@@ -2,7 +2,6 @@ import type { SessionMessage } from 'claude-code'
 
 import { MARKER, clip, isRecord } from './core/common.ts'
 import { NOTE_CONTENT } from './core/notes.ts'
-import type { RecentNote } from './core/notes.ts'
 
 export const PLUGIN = 'okf-wiki-handoff-mod'
 export const SECTION_ID = `${PLUGIN}:handoff`
@@ -44,37 +43,24 @@ export const RESET_INSTRUCTIONS = `${MARKER} new_context`
 export const CONTINUE_PROMPT = `${MARKER} The context was reset to your handoff note at your request. Continue the task from the note.`
 
 /** The system prompt section that sets the note-keeping protocol for the session. */
-export function guidanceSection(options: {
-  concept: string
-  root: string
-  recent: readonly RecentNote[]
-}): string {
-  const recent =
-    options.recent.length === 0
-      ? ''
-      : `\n\nRecent handoff notes of other sessions in this project, which \`${toolId(TOOL.read)}\` reads by slug:\n${options.recent
-          .map(note => `- \`${note.slug}\`: ${note.title || 'untitled'} (updated ${note.modified})`)
-          .join('\n')}\nWhen the person continues one of these tasks, or an older one that \`${toolId(TOOL.search)}\` finds, read that note and carry what still holds into this session's note.`
-
+export function guidanceSection(options: { concept: string; root: string }): string {
   return `# Context management
 
 This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context windows: when the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. Only the main agent keeps this note; a subagent leaves it alone and is given a note of its own once its work runs long.
 
-- Take notes while you work, in the language of the conversation. Add to the note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step, a new rule from the person. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. ${NOTE_CONTENT}
+- Take notes while you work, in the language of the conversation. Add to the note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step, a new rule from the person. ${NOTE_CONTENT}
 - \`${toolId(TOOL.remaining)}\` tells how many tokens remain before automatic compaction; plan long steps against it.
 - When a reminder says the context is nearly exhausted, save the note, call \`${toolId(TOOL.newContext)}\`, and end the turn with a one-line status. When the turn ends, the conversation is replaced by the note and the work continues in a fresh context window on its own. You may also do this at a natural checkpoint once most of the context is used. A Stop hook, such as \`/goal\`'s, can keep the turn from ending; you are then told so, and keep working instead, since the automatic compaction replaces the conversation with the note.
-- The original messages of every session of this project and of their subagents, compacted or not, stay readable: \`${toolId(TOOL.historyList)}\` lists a session's context windows, \`${toolId(TOOL.historySearch)}\` finds messages that contain a text, and \`${toolId(TOOL.historyRead)}\` reads them a page at a time. They default to this session; pass session "all" to the first two to cover every session. When the note lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
-- \`${toolId(TOOL.search)}\` finds the handoff notes of this project that mention a text.
-- Treat the note as internal bookkeeping: you do not need to tell the person each time you update it.${recent}`
+- Treat the note as internal bookkeeping: you do not need to tell the person each time you update it.`
 }
 
 /** Given to a subagent once its work runs long, never at its start, so a short subagent is left as it is. */
 export function agentGuidance(options: { concept: string; root: string; sessionSlug: string; agentId: string }): string {
   return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory: when your context fills up, the compaction leaves only a summary of your conversation and you are told the note is there to read, while the original messages stay in your transcript. The main agent keeps its own note, which you leave alone.
 
-- Add to your note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step. Rewrite it whole with \`${toolId(TOOL.write)}\` to reorganize it or drop what no longer holds, and before a long or risky step. Both write your own note. Your task is what the agent that started you asked for. ${NOTE_CONTENT}
+- Add to your note with \`${toolId(TOOL.append)}\` as things happen: a decision, a finding, a finished step. \`${toolId(TOOL.write)}\` replaces it. Both write your own note. Your task is what the agent that started you asked for. ${NOTE_CONTENT}
 - \`${toolId(TOOL.read)}\` reads your note, or another note of this project by its slug; the main agent's is \`${options.sessionSlug}\`.
-- \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your own original messages, and \`${toolId(TOOL.historySearch)}\` finds messages that contain a text. When the note lacks a detail you need, look it up there instead of guessing.
+- \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your own original messages.
 - Your final answer still goes to the agent that started you, as usual.`
 }
 

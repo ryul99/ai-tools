@@ -26,13 +26,10 @@ export type Host = {
 /** A handoff bundle and how the notes it creates describe themselves. */
 export type Store = { host: Host; root: string; generatedBy: string }
 
-export type RecentNote = { concept: string; slug: string; title: string; modified: string }
-
 /** What a note holds, as the guidance and a compaction's note-writing prompt ask for it. */
 export const NOTE_CONTENT =
   'The note has no fixed layout: write what you would need to pick the task up with nothing else. That is usually what the person asked for and what finished looks like; what is done and in progress, with exact file paths, branches, commands, identifiers and changes not committed yet; the rules the person set, in their own wording where it matters, and the decisions made; the next steps; and what is waiting on the person. Record only what the conversation shows, keep exact names, numbers and error messages, and leave out what the system prompt and instruction files already say.'
 
-export const MAX_RECENT_NOTES = 5
 const SEARCH_CANDIDATES = 500
 export const MAX_SEARCH_RESULTS = 50
 
@@ -105,40 +102,6 @@ export async function writeNote(
   const kept = options.append === true ? current.body.trim() : ''
   const text = [kept, added].filter(part => part !== '').join('\n\n')
   await okf(store, ['body', 'set', concept, '--if-match', current.identity], text === '' ? '' : `${text}\n`)
-}
-
-/** The project's most recently changed session notes other than `exclude`, newest first; subagents' notes are left out. */
-export async function recentNotes(store: Store, folder: string, exclude: string): Promise<RecentNote[]> {
-  if (!(await store.host.exists(`${store.root}/${folder}`))) {
-    return []
-  }
-  const records = await okf(store, ['list', folder, '--tag', HANDOFF_TAG])
-  if (!Array.isArray(records)) {
-    return []
-  }
-  const notes: (RecentNote & { mtimeMs: number })[] = []
-  for (const record of records) {
-    const concept = isRecord(record) && typeof record.id === 'string' ? record.id : undefined
-    if (concept === undefined || !concept.startsWith(`${folder}/`) || concept.includes('/', folder.length + 1) || concept === exclude) {
-      continue
-    }
-    const mtimeMs = await store.host.mtimeMs(notePath(store, concept))
-    if (mtimeMs === undefined) {
-      continue
-    }
-    notes.push({
-      concept,
-      slug: concept.slice(folder.length + 1),
-      title: isRecord(record) ? String(record.title ?? '') : '',
-      modified: utcMinute(mtimeMs),
-      mtimeMs,
-    })
-  }
-
-  return notes
-    .sort((left, right) => right.mtimeMs - left.mtimeMs)
-    .slice(0, MAX_RECENT_NOTES)
-    .map(({ concept, slug, title, modified }) => ({ concept, slug, title, modified }))
 }
 
 export function utcMinute(ms: number): string {

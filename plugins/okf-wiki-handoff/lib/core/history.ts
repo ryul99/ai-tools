@@ -425,7 +425,7 @@ export const HISTORY_TOOLS = {
   },
   history_search: {
     description:
-      "Find the original messages of this session and its subagents, or of another session of this project, that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read.",
+      "Find the original messages of this session and its subagents, or of another session of this project, that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read. When a note or summary lacks a detail you need, such as an exact command, error message or file content, look it up here instead of guessing.",
     properties: {
       query: { type: 'string', description: 'The literal text to find, such as an error message, a path or a command.' },
       session: {
