@@ -21,10 +21,10 @@ okf new <concept> --type <type> [--title <text>] [--description <text>]
   [--generated-by <actor>] [--dry-run]
 okf list [path] [filters]
 okf show <concept>
-okf search <query> [--metadata-only] [--case-sensitive] [--limit <n>] [filters]
+okf search <query> [--metadata-only] [--case-sensitive] [--with-matches] [--limit <n>] [filters]
 ```
 
-`show` prints the whole concept; its JSON adds `identity`, the SHA-256 of the file. Read only the frontmatter with `okf meta get <concept>` and only the body with `okf body get <concept>`. `list` JSON records also include `stale_after` and `latest_verification`. `search --limit` keeps the first matches in concept ID order and notes omitted matches on stderr.
+`show` prints the whole concept; its JSON adds `identity`, the SHA-256 of the file. Read only the frontmatter with `okf meta get <concept>` and only the body with `okf body get <concept>`. `list` JSON records also include `stale_after` and `latest_verification`. `search` matches each word of the query separately and returns one record per concept, most relevant first: concepts containing more of the words lead, then matches in `title` and `id` outrank `tags`, `description`, and body text. JSON records hold `id`, `title`, and `match_count`; add `--with-matches` for a `matches` array of `field`, `excerpt`, and `line`, which can be long. `search --limit` keeps the top concepts and notes omitted concepts on stderr.
 
 The shared list and search filters are:
 

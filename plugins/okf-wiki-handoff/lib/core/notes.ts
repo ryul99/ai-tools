@@ -32,6 +32,9 @@ export const NOTE_CONTENT =
 
 const SEARCH_CANDIDATES = 500
 export const MAX_SEARCH_RESULTS = 50
+const MAX_LINES_PER_NOTE = 3
+// Every handoff note's id and type contain "handoff", so these matches cannot tell notes apart.
+const UNINFORMATIVE_FIELDS = new Set(['id', 'type'])
 
 export function notePath(store: Store, concept: string): string {
   return `${store.root}/${concept}.md`
@@ -120,33 +123,33 @@ export async function noteText(store: Store, concept: string): Promise<string> {
   return `${heading}\n\n${note.body.trim() || '(empty)'}`
 }
 
-/** What `handoff_search` answers: the matching lines of the project's notes, grouped by note. */
+/** What `handoff_search` answers: the project's matching notes, most relevant first, each with its best matching lines. */
 export async function searchNotesText(store: Store, folder: string, query: string, limit: number): Promise<string> {
   if (!(await store.host.exists(`${store.root}/${folder}`))) {
     return 'No handoff note has been written in this project yet.'
   }
-  const found = await okf(store, ['search', query, '--tag', HANDOFF_TAG, '--limit', String(SEARCH_CANDIDATES)])
-  const hits = (Array.isArray(found) ? found : []).filter(
-    (hit): hit is Record<string, unknown> & { id: string } =>
-      isRecord(hit) && typeof hit.id === 'string' && hit.id.startsWith(`${folder}/`),
+  const found = await okf(store, ['search', query, '--tag', HANDOFF_TAG, '--limit', String(SEARCH_CANDIDATES), '--with-matches'])
+  const notes = (Array.isArray(found) ? found : []).filter(
+    (concept): concept is Record<string, unknown> & { id: string; matches: unknown[] } =>
+      isRecord(concept) && typeof concept.id === 'string' && concept.id.startsWith(`${folder}/`) && Array.isArray(concept.matches),
   )
-  if (hits.length === 0) {
+  if (notes.length === 0) {
     return `No handoff note of this project matches "${query}".`
   }
-  const shown = hits.slice(0, limit)
-  const groups = new Map<string, string[]>()
-  for (const hit of shown) {
-    const where = hit.field === 'body' && typeof hit.line === 'number' ? `L${hit.line}` : String(hit.field ?? '')
-    const lines = groups.get(hit.id) ?? []
-    lines.push(`  ${where}: ${String(hit.excerpt ?? '').trim()}`)
-    groups.set(hit.id, lines)
-  }
-  const parts: string[] = []
-  for (const [concept, lines] of groups) {
-    const title = await noteTitle(store, concept)
-    parts.push(`- \`${concept.slice(folder.length + 1)}\`${title === '' ? '' : ` (${title})`}\n${lines.join('\n')}`)
-  }
-  const more = hits.length > shown.length ? `\n\n[${hits.length - shown.length} more matches: narrow the query or raise limit]` : ''
+  const parts = notes.slice(0, limit).map(({ id, title, matches }) => {
+    const useful = matches.filter(isRecord).filter((match) => !UNINFORMATIVE_FIELDS.has(String(match.field)))
+    const lines = useful.slice(0, MAX_LINES_PER_NOTE).map((match) => {
+      const where = match.field === 'body' && typeof match.line === 'number' ? `L${match.line}` : String(match.field ?? '')
+
+      return `  ${where}: ${String(match.excerpt ?? '').trim()}`
+    })
+    if (useful.length > lines.length) {
+      lines.push(`  (+${useful.length - lines.length} more)`)
+    }
+
+    return [`- \`${id.slice(folder.length + 1)}\`${typeof title === 'string' ? ` (${title})` : ''}`, ...lines].join('\n')
+  })
+  const more = notes.length > parts.length ? `\n\n[${notes.length - parts.length} more notes: narrow the query or raise limit]` : ''
 
   return `${parts.join('\n')}${more}`
 }

@@ -726,11 +726,11 @@ const TOOLS = [
   {
     name: 'handoff_search',
     description:
-      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds with handoff_read. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
+      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, most relevant first, with up to three matching lines each. Read a note it finds with handoff_read. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
     inputSchema: withNote(
       {
         query: { type: 'string', description: 'The text to find.' },
-        limit: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS, description: 'How many matching lines to return; 20 by default.' },
+        limit: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS, description: 'How many notes to return; 20 by default.' },
       },
       ['query'],
     ),

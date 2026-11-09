@@ -133,7 +133,7 @@ const SEARCH_SCHEMA = {
       type: 'integer',
       minimum: 1,
       maximum: MAX_SEARCH_RESULTS,
-      description: `How many matching lines to return; ${DEFAULT_NOTE_SEARCH_LIMIT} by default.`,
+      description: `How many notes to return; ${DEFAULT_NOTE_SEARCH_LIMIT} by default.`,
     },
   },
   required: ['query'],
@@ -166,7 +166,7 @@ const TOOLS = [
   {
     name: TOOL.search,
     description:
-      "Find the handoff notes of this project that mention a text, in their titles or bodies, with the matching lines. Read a note it finds by its slug. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
+      "Find the handoff notes of this project that mention a text, in their titles or bodies, most relevant first, with up to three matching lines each. Read a note it finds by its slug. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
     inputSchema: SEARCH_SCHEMA,
   },
   {
