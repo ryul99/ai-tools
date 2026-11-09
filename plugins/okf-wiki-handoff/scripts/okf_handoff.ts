@@ -407,7 +407,7 @@ Keep the note current without being asked, with the tools of the \`${SERVER_NAME
 - \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step, a new rule from the person.
 - \`handoff_write\` replaces the whole note. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.
 - \`handoff_read\` reads the note or another note of this project, and \`handoff_search\` finds the project's notes that mention a text.
-- \`history_list\`, \`history_search\` and \`history_read\` list, search and read the original messages of this project's sessions and their subagents, compacted or not. When the note or a summary lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
+- \`history_list\`, \`history_search\` and \`history_read\` list, search and read the original messages of this project's sessions and their subagents, compacted or not. They default to this session; pass session="all" to \`history_list\` or \`history_search\` to cover every session. When the note or a summary lacks a detail you need, such as an exact command, error message or file content, look it up there instead of guessing.
 
 Write the note in the language of the conversation. ${NOTE_CONTENT} You do not need to tell the person each time you update the note.`
 }

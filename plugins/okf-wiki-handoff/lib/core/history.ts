@@ -15,6 +15,7 @@ const SNIPPET_CHARS = 160
 const PREVIEW_LINES = 80
 const PREVIEW_CHARS = 120
 const CODEX_DEPTH = 3
+const ALL_SESSIONS = 'all'
 
 // The history tools' own calls and answers are left out of a search, which would otherwise find itself.
 const OWN_TOOL_USE = /\[tool_use [^\]]*history_(?:list|search|read)\]/
@@ -211,7 +212,7 @@ function windowOf(starts: readonly number[], line: number): number {
 }
 
 function unknownSession(session: string): string {
-  return `No session \`${session}\` in this project. List the sessions with history_list.`
+  return `No session \`${session}\` in this project. List the sessions with history_list and "session" as "${ALL_SESSIONS}".`
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +229,7 @@ function firstPrompt(lines: readonly string[]): string | undefined {
   return undefined
 }
 
-/** What `history_list` answers: the project's sessions, or one session's context windows and subagents. */
+/** What `history_list` answers: one session's context windows and subagents, or every session of the project. */
 export async function historyListText(
   host: Host,
   locator: Locator,
@@ -236,8 +237,8 @@ export async function historyListText(
 ): Promise<string> {
   const sessions = await projectSessions(host, locator)
   const mine = (session: Session) => (sameSession(session.id, locator.sessionId) ? ' (this session)' : '')
-  if (options.session !== undefined) {
-    const named = options.session
+  const named = options.session ?? locator.sessionId
+  if (named !== ALL_SESSIONS) {
     const session = sessions.find(candidate => sameSession(candidate.id, named))
     if (session === undefined) {
       return unknownSession(named)
@@ -256,7 +257,9 @@ Context windows:
 ${windows.join('\n')}
 
 Subagents:
-${agents.length === 0 ? '(none)' : agents.join('\n')}`
+${agents.length === 0 ? '(none)' : agents.join('\n')}
+
+Pass "session" as "${ALL_SESSIONS}" to list every session of this project.`
   }
   if (sessions.length === 0) {
     return `${LIST_HEADER}: no transcript of this project was found under ${locator.root}.`
@@ -284,7 +287,7 @@ ${agents.length === 0 ? '(none)' : agents.join('\n')}`
 ${parts.join('\n')}`
 }
 
-/** What `history_search` answers: messages that contain `query`, ignoring case, newest sessions first. */
+/** What `history_search` answers: messages of one session, or of every session newest first, that contain `query`, ignoring case. */
 export async function historySearchText(
   host: Host,
   locator: Locator,
@@ -295,9 +298,10 @@ export async function historySearchText(
     return 'Pass "query" as the text to find.'
   }
   const sessions = await projectSessions(host, locator)
-  const named = options.session
-  const targets = named === undefined ? sessions : sessions.filter(session => sameSession(session.id, named))
-  if (named !== undefined && targets.length === 0) {
+  const named = options.session ?? locator.sessionId
+  const isAll = named === ALL_SESSIONS
+  const targets = isAll ? sessions : sessions.filter(session => sameSession(session.id, named))
+  if (!isAll && targets.length === 0) {
     return unknownSession(named)
   }
   // The transcript holds the text JSON-encoded, so the raw lines are matched that way and the rendered message confirms it.
@@ -330,11 +334,13 @@ export async function historySearchText(
     }
   }
   if (results.length === 0) {
-    return `${SEARCH_HEADER} "${query}": no message matches.`
+    return isAll
+      ? `${SEARCH_HEADER} "${query}": no message matches in any session.`
+      : `${SEARCH_HEADER} "${query}": no message matches in session \`${named}\`. Pass "session" as "${ALL_SESSIONS}" to search every session of this project.`
   }
-  const more = isMore ? '\n\n[more matches: narrow the query, pass "session", or raise "limit"]' : ''
+  const more = isMore ? `\n\n[more matches: narrow the query${isAll ? ', pass a session id as "session",' : ''} or raise "limit"]` : ''
 
-  return `${SEARCH_HEADER} "${query}": ${results.length} matches, newest sessions first. Read around one with history_read and its session, agent and from_line.
+  return `${SEARCH_HEADER} "${query}": ${results.length} matches${isAll ? ', newest sessions first' : ''}. Read around one with history_read and its session, agent and from_line.
 
 ${results.join('\n')}${more}`
 }
@@ -402,19 +408,30 @@ const SESSION_PROPERTY = {
 export const HISTORY_TOOLS = {
   history_list: {
     description:
-      "List this project's sessions, newest first, with each one's context windows, subagents, note title and first prompt; or, given a session, its context windows by line range and its subagents.",
+      `List the context windows by line range and the subagents of this session or another session of this project; or, with session "${ALL_SESSIONS}", this project's sessions, newest first, with each one's context window count, subagent count, note title and first prompt.`,
     properties: {
-      session: { type: 'string', description: 'A session id, to list its context windows and subagents.' },
-      limit: { type: 'integer', minimum: 1, maximum: MAX_RESULTS, description: `How many sessions to list; ${DEFAULT_LIST_LIMIT} by default.` },
+      session: {
+        type: 'string',
+        description: `A session id, to list its context windows and subagents, or "${ALL_SESSIONS}" to list every session of this project; defaults to this session.`,
+      },
+      limit: {
+        type: 'integer',
+        minimum: 1,
+        maximum: MAX_RESULTS,
+        description: `How many sessions to list with session "${ALL_SESSIONS}", where it alone applies; ${DEFAULT_LIST_LIMIT} by default.`,
+      },
     },
     required: [] as string[],
   },
   history_search: {
     description:
-      "Find the original messages of this project's sessions and their subagents that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read.",
+      "Find the original messages of this session and its subagents, or of another session of this project, that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read.",
     properties: {
       query: { type: 'string', description: 'The literal text to find, such as an error message, a path or a command.' },
-      session: { type: 'string', description: 'A session id to search only that session and its subagents.' },
+      session: {
+        type: 'string',
+        description: `A session id from history_list to search that session and its subagents, or "${ALL_SESSIONS}" for every session of this project; defaults to this session.`,
+      },
       limit: { type: 'integer', minimum: 1, maximum: MAX_RESULTS, description: `How many matches to return; ${DEFAULT_SEARCH_LIMIT} by default.` },
     },
     required: ['query'],

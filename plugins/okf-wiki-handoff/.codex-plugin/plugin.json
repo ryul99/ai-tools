@@ -1,6 +1,6 @@
 {
   "name": "okf-wiki-handoff",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Keeps a per-session OKF handoff note current and brings it back after context compaction.",
   "author": {
     "name": "ryul99",
