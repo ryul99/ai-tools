@@ -28,7 +28,14 @@ export type Store = { host: Host; root: string; generatedBy: string }
 
 /** What a note holds, as the guidance and a compaction's note-writing prompt ask for it. */
 export const NOTE_CONTENT =
-  'The note has no fixed layout: write what you would need to pick the task up with nothing else. That is usually what the person asked for and what finished looks like; what is done and in progress, with exact file paths, branches, commands, identifiers and changes not committed yet; the rules the person set, in their own wording where it matters, and the decisions made; the next steps; and what is waiting on the person. Record only what the conversation shows, keep exact names, numbers and error messages, and leave out what the system prompt and instruction files already say.'
+  "The note has no fixed layout: write what you would need to pick the task up with nothing else, such as the goal and what finished looks like, the state of the work including what is uncommitted or waiting on the person, the person's rules in their own wording, the decisions made and the next steps. Record only what the conversation shows, keep names, numbers and error messages exact, and leave out what your instructions already say."
+
+/**
+ * How a note is kept while the work goes on. A compaction's note-writing prompt
+ * leaves it out: it asks for the whole note at once, with nothing to correct.
+ */
+export const NOTE_UPKEEP =
+  'It says where the task stands now and is not a log: when something in it stops being true or stops mattering for the work ahead, change or remove it instead of adding a correction after it.'
 
 const SEARCH_CANDIDATES = 500
 export const MAX_SEARCH_RESULTS = 50
@@ -74,13 +81,14 @@ export async function noteTitle(store: Store, concept: string): Promise<string> 
 
 /**
  * Writes the note, creating it first when it is missing. With `append`, the
- * body is added after what the note holds instead of replacing it.
+ * body is added after what the note holds instead of replacing it. Resolves
+ * the length of the note's body in characters.
  */
 export async function writeNote(
   store: Store,
   concept: string,
   options: { title?: string; body: string; append?: boolean },
-): Promise<void> {
+): Promise<number> {
   if (!(await store.host.exists(notePath(store, concept)))) {
     await ensureBundle(store)
     await okf(store, [
@@ -106,6 +114,13 @@ export async function writeNote(
   const kept = options.append === true ? current.body.trim() : ''
   const text = [kept, added].filter(part => part !== '').join('\n\n')
   await okf(store, ['body', 'set', concept, '--if-match', current.identity], text === '' ? '' : `${text}\n`)
+
+  return text.length
+}
+
+/** What `handoff_write` and `handoff_append` answer. The size is there for the agent to judge when the note needs tidying. */
+export function savedText(concept: string, options: { isAppend: boolean; chars: number }): string {
+  return `${options.isAppend ? 'Appended to' : 'Saved'} ${concept}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
 }
 
 export function utcMinute(ms: number): string {

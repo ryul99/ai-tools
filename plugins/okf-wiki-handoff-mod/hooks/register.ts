@@ -28,6 +28,7 @@ import {
   noteText,
   noteTitle,
   readNote,
+  savedText,
   searchNotesText,
   utcMinute,
   writeNote,
@@ -154,19 +155,19 @@ const TOOLS = [
   {
     name: TOOL.write,
     description:
-      "Replace the whole of this session's handoff note, creating it when it does not exist. The note has no fixed layout. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.",
+      "Replace the whole of this session's handoff note, creating it when it does not exist. It is the only way to change or remove what the note already says.",
     inputSchema: WRITE_SCHEMA,
   },
   {
     name: TOOL.append,
     description:
-      "Add text to the end of this session's handoff note, creating it when it does not exist, without passing the rest of the note again.",
+      "Add text to the end of this session's handoff note, creating it when it does not exist. What the note already says stays as it is.",
     inputSchema: APPEND_SCHEMA,
   },
   {
     name: TOOL.search,
     description:
-      "Find the handoff notes of this project that mention a text, in their titles or bodies, most relevant first, with up to three matching lines each. Read a note it finds by its slug. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
+      "Find the handoff notes of this project that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
     inputSchema: SEARCH_SCHEMA,
   },
   {
@@ -177,7 +178,7 @@ const TOOLS = [
   {
     name: TOOL.newContext,
     description:
-      'Start a fresh context window when this turn ends: the conversation is replaced by the handoff note and the work continues on its own. Save the note first. Does not touch files or other environment state.',
+      'Start a fresh context window when this turn ends: the conversation is replaced by the handoff note and the work continues on its own. Bring the note up to date first, then end the turn with a one-line status. Does not touch files or other environment state.',
     inputSchema: { type: 'object', properties: {} },
   },
   ...HISTORY_TOOL_NAMES.map(name => ({
@@ -448,12 +449,7 @@ async function dueReminder($: EngineInterface): Promise<string | undefined> {
     record.urgedWrites !== writes
   ) {
     record.urgedWrites = writes
-    text = urgentReminder({
-      tokens,
-      compactAt: current.compactAt,
-      isNoteCurrent: record.writes !== undefined && since < FRESH_TOKENS,
-      isTurnHeld: isTurnHeld(record),
-    })
+    text = urgentReminder({ tokens, compactAt: current.compactAt, isTurnHeld: isTurnHeld(record) })
   } else if (
     since >= runtime.remindTokens &&
     (record.remindedTokens === undefined || tokens - record.remindedTokens >= runtime.remindTokens)
@@ -560,8 +556,6 @@ async function replaceWithHandoff(
 
   const tail = isReset ? [] : keptTail(e.messages)
   const text = handoffMessage({
-    root: place.store.root,
-    concept,
     handoff,
     prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
     window,
@@ -685,7 +679,7 @@ async function saveTool(
   }
   const { agentId } = options
   const concept = await ownConcept($, place, agentId)
-  await writeNote(place.store, concept, { title, body, append: options.isAppend })
+  const chars = await writeNote(place.store, concept, { title, body, append: options.isAppend })
   if (agentId === undefined) {
     const record = await sessionRecord($)
     const { context } = await $.session.usage()
@@ -706,7 +700,7 @@ async function saveTool(
     })
   }
 
-  return `${options.isAppend ? 'Appended to' : 'Saved'} ${concept}.`
+  return savedText(concept, { isAppend: options.isAppend, chars })
 }
 
 async function searchTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
@@ -862,7 +856,7 @@ export const register: Register = on => {
 
     return {
       result:
-        'A fresh context window starts when this turn ends: the conversation is replaced by the handoff note, and the work continues on its own. If the note is behind the work, update it with handoff_write first. Then end the turn with a one-line status.',
+        'A fresh context window starts when this turn ends. Once the note is current, end the turn with a one-line status.',
     }
   })
   on('tool.call', { tool: toolId(TOOL.historyList) }, async ($, e) => ({

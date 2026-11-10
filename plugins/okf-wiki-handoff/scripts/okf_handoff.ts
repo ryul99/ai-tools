@@ -31,10 +31,12 @@ import type { Usage } from '../lib/core/transcript.ts'
 import {
   MAX_SEARCH_RESULTS,
   NOTE_CONTENT,
+  NOTE_UPKEEP,
   notePath,
   noteText,
   noteTitle,
   readNote,
+  savedText,
   searchNotesText,
   utcMinute,
   writeNote,
@@ -400,25 +402,22 @@ async function observe(state: State, store: Store, usage: Usage | undefined, isA
 // Hook messages
 
 function guidance(concept: string, root: string): string {
-  return `${MARKER} This session keeps a handoff note, the OKF concept \`${concept}\` in the bundle \`${root}\`. It is your working memory across context compaction: after a compaction the note is shown to you again, while the rest of the conversation survives only as a summary and in the session's transcript.
+  return `${MARKER} This session keeps a handoff note, the OKF concept \`${concept}\` in the bundle \`${root}\`. After a compaction its first ${MAX_INJECTED_NOTE_CHARS.toLocaleString('en-US')} characters are shown to you again beside the summary, while the original messages stay in the session's transcript.
 
-Keep the note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${concept}". If those tools are not loaded yet, load them with tool search first.
-- \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step, a new rule from the person.
-- \`handoff_write\`, \`handoff_read\` and \`handoff_search\` replace, read and search the notes, and \`history_list\`, \`history_search\` and \`history_read\` reach the original messages of this project's sessions and their subagents, compacted or not.
+Keep the note current without being asked, in the language of the conversation. ${NOTE_UPKEEP} What is outdated in it costs room and misleads. When and how you update it is your call, and the person does not need to hear about it.
 
-Write the note in the language of the conversation. ${NOTE_CONTENT} You do not need to tell the person each time you update the note.`
+${NOTE_CONTENT}
+
+The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write, read and search the notes, each called with note="${concept}", and its \`history_*\` tools reach the original messages. Load them with tool search if they are not loaded yet.`
 }
 
 /** Given to a subagent once its work runs long or its context is compacted, never at its start. */
 function agentGuidance(options: { concept: string; sessionConcept: string; root: string; sessionId: string; agentId: string }): string {
-  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. It is your working memory across context compaction: after a compaction your conversation survives only as a summary and in your transcript, and you are told the note is there to read. The main agent keeps its own note, \`${options.sessionConcept}\`, which you may read but never write.
+  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. After a compaction only a summary of your conversation remains and you are told the note is there to read.
 
-Keep your note current without being asked, with the tools of the \`${SERVER_NAME}\` MCP server, each called with note="${options.concept}". If those tools are not loaded yet, load them with tool search first.
-- \`handoff_append\` adds to the end of the note. Use it as things happen: a decision, a finding, a finished step.
-- \`handoff_write\` replaces the whole note.
-- \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages.
+Keep it current without being asked, in the language of your task. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it.
 
-Write the note in the language of your task. Your task is what the agent that started you asked for. ${NOTE_CONTENT} Your final answer still goes to the agent that started you, as usual.`
+The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write and read the notes, each called with note="${options.concept}"; load them with tool search if they are not loaded yet. The main agent's note \`${options.sessionConcept}\` is yours to read but never to write, and \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages.`
 }
 
 async function compactedText(store: Store, concept: string): Promise<string> {
@@ -428,13 +427,13 @@ async function compactedText(store: Store, concept: string): Promise<string> {
     if (handoff.length > MAX_INJECTED_NOTE_CHARS) {
       handoff = `${handoff.slice(0, MAX_INJECTED_NOTE_CHARS)}\n[clipped: read the rest with handoff_read]`
     }
-    text = `\n\nThe context was just compacted. This is the handoff note you kept before it; continue from it together with the summary.\n<handoff-note>\n${handoff}\n</handoff-note>`
+    text = `\n\nThe context was just compacted. This is your handoff note; continue from it together with the summary.\n<handoff-note>\n${handoff}\n</handoff-note>`
   } else {
     text =
       '\n\nThe context was just compacted before the handoff note had any content. Write the note as soon as you have re-established the state.'
   }
 
-  return `${text}\n\nThe conversation before the compaction is still in this session's transcript. When a detail you need is missing, find it with \`history_search\` or read it with \`history_read\` instead of guessing.`
+  return text
 }
 
 /**
@@ -454,7 +453,7 @@ function reminder(concept: string, tokens: number, state: State, interval: numbe
   }
   state.reminded_tokens = tokens
 
-  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${concept}\` was last updated. Update it with \`handoff_append\` or \`handoff_write\` at the next good point.`
+  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${concept}\` was last updated. Bring it up to date at the next good point.`
 }
 
 // ---------------------------------------------------------------------------
@@ -714,19 +713,19 @@ const TOOLS = [
   {
     name: 'handoff_write',
     description:
-      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. The note has no fixed layout. Use it to reorganize the note or drop what no longer holds, and before a long or risky step.",
+      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. It is the only way to change or remove what the note already says.",
     inputSchema: withNote({ body: { type: 'string', description: 'The whole note in Markdown.' }, title: TITLE_PROPERTY }, ['body']),
   },
   {
     name: 'handoff_append',
     description:
-      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist, without passing the rest of the note again.",
+      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist. What the note already says stays as it is.",
     inputSchema: withNote({ text: { type: 'string', description: 'The Markdown to add.' }, title: TITLE_PROPERTY }, ['text']),
   },
   {
     name: 'handoff_search',
     description:
-      "Find the okf-wiki-handoff notes of this project that mention a text, in their titles or bodies, most relevant first, with up to three matching lines each. Read a note it finds with handoff_read. When the person continues an earlier task, use it to find that task's note and carry what still holds into your own note.",
+      "Find the okf-wiki-handoff notes of this project that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
     inputSchema: withNote(
       {
         query: { type: 'string', description: 'The text to find.' },
@@ -774,19 +773,22 @@ const TOOL_HANDLERS: Record<string, (server: Server, input: Record<string, unkno
   handoff_read: ({ store }, input) => noteText(store, checkedNote(input).concept),
   async handoff_write({ store }, input) {
     const { concept } = checkedNote(input)
-    await writeNote(store, concept, { title: optionalTitle(input), body: requiredText(input, 'body', 'the whole note in Markdown') })
+    const chars = await writeNote(store, concept, {
+      title: optionalTitle(input),
+      body: requiredText(input, 'body', 'the whole note in Markdown'),
+    })
 
-    return `Saved ${concept}.`
+    return savedText(concept, { isAppend: false, chars })
   },
   async handoff_append({ store }, input) {
     const { concept } = checkedNote(input)
-    await writeNote(store, concept, {
+    const chars = await writeNote(store, concept, {
       title: optionalTitle(input),
       body: requiredText(input, 'text', 'the Markdown to add'),
       append: true,
     })
 
-    return `Appended to ${concept}.`
+    return savedText(concept, { isAppend: true, chars })
   },
   handoff_search({ store }, input) {
     const { folder } = checkedNote(input)
