@@ -191,11 +191,7 @@ export function handoffMessage(options: {
   handoff: string
   prompt: string | undefined
   window: number
-  isReset: boolean
 }): string {
-  const cause = options.isReset
-    ? 'was reset at your request'
-    : 'was compacted when the context window filled up'
   const prompt =
     options.prompt === undefined
       ? ''
@@ -203,7 +199,7 @@ export function handoffMessage(options: {
   const note = options.handoff === '' ? '(The note is empty.)' : options.handoff
   const history = `\n\nThe original messages stay in this session's transcript. When a detail you need is missing here, find it with ${toolId(TOOL.historySearch)} or read it with ${toolId(TOOL.historyRead)} instead of guessing.`
 
-  return `${MARKER} This is context window #${options.window}. The conversation before this point ${cause} and was replaced by your handoff note below, the OKF concept ${options.concept} in the bundle ${options.root}. Keep it current with ${toolId(TOOL.append)} and ${toolId(TOOL.write)}.
+  return `${MARKER} This is context window #${options.window}. The earlier conversation was replaced by your handoff note below, the OKF concept ${options.concept} in the bundle ${options.root}. Keep it current with ${toolId(TOOL.append)} and ${toolId(TOOL.write)}.
 
 ${prompt}<handoff-note>
 ${note}

@@ -565,7 +565,6 @@ async function replaceWithHandoff(
     handoff,
     prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
     window,
-    isReset,
   })
   $.ui.toast(`okf handoff: context window #${window} starts from ${concept}`)
 
