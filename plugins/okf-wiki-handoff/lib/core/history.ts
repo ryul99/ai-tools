@@ -473,14 +473,14 @@ const SESSION_PROPERTY = {
 
 const ALL_PROJECTS_PROPERTY = {
   type: 'boolean',
-  description: `Cover the sessions of every project instead of this one, as with session "${ALL_SESSIONS}" when no session is given; slower. Use it when the person refers to work done in another project.`,
+  description: `With session "${ALL_SESSIONS}" or no session, cover the sessions of every project instead of this one; slower.`,
 }
 
 /** The history tools by name: what each does and the input it takes, without the plugin's own properties. */
 export const HISTORY_TOOLS = {
   history_list: {
     description:
-      `List the context windows by line range and the subagents of this session or another session of any project; or, with session "${ALL_SESSIONS}", this project's sessions, or with all_projects every project's, newest first, with each one's context window count, subagent count, note title and first prompt.`,
+      "List a session's context windows by line range and its subagents, or list sessions newest first, with each one's context window count, subagent count, note title and first prompt.",
     properties: {
       session: {
         type: 'string',
@@ -491,7 +491,7 @@ export const HISTORY_TOOLS = {
         type: 'integer',
         minimum: 1,
         maximum: MAX_RESULTS,
-        description: `How many sessions to list with session "${ALL_SESSIONS}" or all_projects, where it alone applies; ${DEFAULT_LIST_LIMIT} by default.`,
+        description: `How many sessions to list, when it lists sessions; ${DEFAULT_LIST_LIMIT} by default.`,
       },
     },
     required: [] as string[],

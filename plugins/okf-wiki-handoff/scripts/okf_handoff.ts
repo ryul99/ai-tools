@@ -697,7 +697,7 @@ async function logError(dataDir: string, error: unknown): Promise<void> {
 
 const NOTE_PROPERTY = {
   type: 'string',
-  description: "Your handoff note's name, <project-key>/<slug>, as your okf-wiki-handoff instructions give it: the session's, or a subagent's own.",
+  description: "Your handoff note's name, as your instructions give it.",
 }
 
 function withNote(properties: Record<string, unknown>, required: readonly string[]): Record<string, unknown> {
@@ -709,13 +709,13 @@ function withNote(properties: Record<string, unknown>, required: readonly string
   }
 }
 
-const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task; optional.' }
+const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task.' }
 
 const TOOLS = [
   {
     name: 'handoff_read',
     description:
-      "Read your okf-wiki-handoff note, or another note of any project: pass that note's name, <project-key>/<slug>, as note.",
+      "Read your okf-wiki-handoff note, or another note of any project by its name, as handoff_search gives it.",
     inputSchema: withNote({}, []),
   },
   {
@@ -727,7 +727,7 @@ const TOOLS = [
   {
     name: 'handoff_append',
     description:
-      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist. What the note already says stays as it is.",
+      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist.",
     inputSchema: withNote({ text: { type: 'string', description: 'The Markdown to add.' }, title: TITLE_PROPERTY }, ['text']),
   },
   {
@@ -739,7 +739,7 @@ const TOOLS = [
         query: { type: 'string', description: 'The text to find.' },
         all_projects: {
           type: 'boolean',
-          description: 'Cover the notes of every project instead of this one. Use it when the person refers to work done in another project.',
+          description: 'Cover the notes of every project instead of this one.',
         },
         limit: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS, description: 'How many notes to return; 20 by default.' },
       },

@@ -108,7 +108,7 @@ const NOTE_SCHEMA = {
   },
 }
 
-const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task; optional.' }
+const TITLE_PROPERTY = { type: 'string', description: 'A short title for the task.' }
 
 const WRITE_SCHEMA = {
   type: 'object',
@@ -134,7 +134,7 @@ const SEARCH_SCHEMA = {
     query: { type: 'string', description: 'The text to find.' },
     all_projects: {
       type: 'boolean',
-      description: 'Cover the notes of every project instead of this one. Use it when the person refers to work done in another project.',
+      description: 'Cover the notes of every project instead of this one.',
     },
     limit: {
       type: 'integer',
@@ -167,7 +167,7 @@ const TOOLS = [
   {
     name: TOOL.append,
     description:
-      "Add text to the end of this session's handoff note, creating it when it does not exist. What the note already says stays as it is.",
+      "Add text to the end of this session's handoff note, creating it when it does not exist.",
     inputSchema: APPEND_SCHEMA,
   },
   {
@@ -184,7 +184,7 @@ const TOOLS = [
   {
     name: TOOL.newContext,
     description:
-      'Start a fresh context window when this turn ends: the conversation is replaced by the handoff note and the work continues on its own. Bring the note up to date first, then end the turn with a one-line status. Does not touch files or other environment state.',
+      'Start a fresh context window when this turn ends, where the work continues on its own. End the turn with a one-line status. Does not touch files or other environment state.',
     inputSchema: { type: 'object', properties: {} },
   },
   ...HISTORY_TOOL_NAMES.map(name => ({
