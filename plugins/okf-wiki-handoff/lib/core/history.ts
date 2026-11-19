@@ -35,7 +35,17 @@ export type Locator = {
 }
 
 type Agent = { id: string; path: string; label: string }
-type Session = { id: string; path: string; mtimeMs: number; agents: Agent[] }
+type Session = {
+  id: string
+  path: string
+  mtimeMs: number
+  agents: Agent[]
+  /** The project's key, which also names its folder of handoff notes. */
+  key: string
+  /** How the project is shown: Codex's working directory, or Claude Code's folder name. */
+  project: string
+}
+type Scope = 'project' | 'all'
 
 function sameSession(left: string, right: string): boolean {
   return sessionSlug(left) === sessionSlug(right)
@@ -99,11 +109,8 @@ async function claudeAgents(host: Host, folder: string): Promise<Agent[]> {
   return agents
 }
 
-async function claudeSessions(host: Host, locator: Locator): Promise<Session[]> {
-  const folder = await claudeFolder(host, locator)
-  if (folder === undefined) {
-    return []
-  }
+async function claudeFolderSessions(host: Host, folder: string): Promise<Session[]> {
+  const key = folder.slice(folder.lastIndexOf('/') + 1)
   const sessions: Session[] = []
   for (const entry of await host.list(folder)) {
     if (entry.kind !== 'file' || !entry.name.endsWith('.jsonl')) {
@@ -115,10 +122,28 @@ async function claudeSessions(host: Host, locator: Locator): Promise<Session[]> 
       path: `${folder}/${entry.name}`,
       mtimeMs: entry.mtimeMs,
       agents: await claudeAgents(host, `${folder}/${id}/subagents`),
+      key,
+      project: key,
     })
   }
 
   return sessions
+}
+
+async function claudeSessions(host: Host, locator: Locator, scope: Scope): Promise<Session[]> {
+  if (scope === 'all') {
+    const sessions: Session[] = []
+    for (const entry of await host.list(locator.root)) {
+      if (entry.kind === 'dir') {
+        sessions.push(...(await claudeFolderSessions(host, `${locator.root}/${entry.name}`)))
+      }
+    }
+
+    return sessions
+  }
+  const folder = await claudeFolder(host, locator)
+
+  return folder === undefined ? [] : await claudeFolderSessions(host, folder)
 }
 
 async function rollouts(host: Host, folder: string, depth: number): Promise<{ path: string; mtimeMs: number }[]> {
@@ -153,12 +178,22 @@ function codexMeta(line: string | undefined): { id: string; cwd: string; parent?
   return { id: payload.id, cwd: payload.cwd, parent: parent as string | undefined, label }
 }
 
-async function codexSessions(host: Host, locator: Locator): Promise<Session[]> {
+async function codexSessions(host: Host, locator: Locator, scope: Scope): Promise<Session[]> {
   const threads: (Session & { parent?: string; label: string })[] = []
   for (const file of await rollouts(host, locator.root, CODEX_DEPTH)) {
     const meta = codexMeta((await host.readLines(file.path, 1, 1))[0])
-    if (meta !== undefined && projectKey(meta.cwd) === locator.key) {
-      threads.push({ id: meta.id, path: file.path, mtimeMs: file.mtimeMs, agents: [], parent: meta.parent, label: meta.label })
+    const key = meta === undefined ? undefined : projectKey(meta.cwd)
+    if (meta !== undefined && key !== undefined && (scope === 'all' || key === locator.key)) {
+      threads.push({
+        id: meta.id,
+        path: file.path,
+        mtimeMs: file.mtimeMs,
+        agents: [],
+        key,
+        project: meta.cwd,
+        parent: meta.parent,
+        label: meta.label,
+      })
     }
   }
   const byId = new Map(threads.map(thread => [thread.id, thread]))
@@ -175,14 +210,24 @@ async function codexSessions(host: Host, locator: Locator): Promise<Session[]> {
   return sessions
 }
 
-/** The project's sessions, newest first. */
-async function projectSessions(host: Host, locator: Locator): Promise<Session[]> {
+/** The sessions of the project, or of every project, newest first. */
+async function sessionsIn(host: Host, locator: Locator, scope: Scope): Promise<Session[]> {
   if (!(await host.exists(locator.root))) {
     return []
   }
-  const sessions = locator.kind === 'claude' ? await claudeSessions(host, locator) : await codexSessions(host, locator)
+  const sessions = locator.kind === 'claude' ? await claudeSessions(host, locator, scope) : await codexSessions(host, locator, scope)
 
   return sessions.sort((left, right) => right.mtimeMs - left.mtimeMs)
+}
+
+/**
+ * A session by its id. Ids are UUIDs, so one found in any project is the one meant; the project is
+ * searched first, and the newest copy wins when a transcript was copied into another project.
+ */
+async function findSession(host: Host, locator: Locator, id: string): Promise<Session | undefined> {
+  const isNamed = (session: Session) => sameSession(session.id, id)
+
+  return (await sessionsIn(host, locator, 'project')).find(isNamed) ?? (await sessionsIn(host, locator, 'all')).find(isNamed)
 }
 
 /** The lines that open each context window: the first line, then each compaction's. */
@@ -212,7 +257,12 @@ function windowOf(starts: readonly number[], line: number): number {
 }
 
 function unknownSession(session: string): string {
-  return `No session \`${session}\` in this project. List the sessions with history_list and "session" as "${ALL_SESSIONS}".`
+  return `No session \`${session}\` was found in any project. List this project's sessions with history_list and "session" as "${ALL_SESSIONS}", or every project's with all_projects.`
+}
+
+/** The session a tool names, or every session when it names none and asks for every project. */
+function namedSession(locator: Locator, options: { session?: string; allProjects?: boolean }): string {
+  return options.session ?? (options.allProjects === true ? ALL_SESSIONS : locator.sessionId)
 }
 
 // ---------------------------------------------------------------------------
@@ -229,17 +279,19 @@ function firstPrompt(lines: readonly string[]): string | undefined {
   return undefined
 }
 
-/** What `history_list` answers: one session's context windows and subagents, or every session of the project. */
+/** The note title of a session, found by its id in the notes folder of its project's key. */
+export type TitleOf = (sessionId: string, key: string) => Promise<string>
+
+/** What `history_list` answers: one session's context windows and subagents, or every session of the project or of every project. */
 export async function historyListText(
   host: Host,
   locator: Locator,
-  options: { session?: string; limit: number; titleOf: (sessionId: string) => Promise<string> },
+  options: { session?: string; allProjects?: boolean; limit: number; titleOf: TitleOf },
 ): Promise<string> {
-  const sessions = await projectSessions(host, locator)
   const mine = (session: Session) => (sameSession(session.id, locator.sessionId) ? ' (this session)' : '')
-  const named = options.session ?? locator.sessionId
+  const named = namedSession(locator, options)
   if (named !== ALL_SESSIONS) {
-    const session = sessions.find(candidate => sameSession(candidate.id, named))
+    const session = await findSession(host, locator, named)
     if (session === undefined) {
       return unknownSession(named)
     }
@@ -251,7 +303,9 @@ export async function historyListText(
       agents.push(`- \`${agent.id}\`${agent.label === '' ? '' : `: ${agent.label}`} (${(await host.lineCount(agent.path)).toLocaleString('en-US')} lines)`)
     }
 
-    return `${LIST_HEADER}: \`${session.id}\`${mine(session)}, ${session.path}
+    const project = session.key === locator.key ? '' : `, project ${session.project}`
+
+    return `${LIST_HEADER}: \`${session.id}\`${mine(session)}${project}, ${session.path}
 
 Context windows:
 ${windows.join('\n')}
@@ -261,19 +315,22 @@ ${agents.length === 0 ? '(none)' : agents.join('\n')}
 
 Pass "session" as "${ALL_SESSIONS}" to list every session of this project.`
   }
+  const scope: Scope = options.allProjects === true ? 'all' : 'project'
+  const sessions = await sessionsIn(host, locator, scope)
   if (sessions.length === 0) {
-    return `${LIST_HEADER}: no transcript of this project was found under ${locator.root}.`
+    return `${LIST_HEADER}: no transcript of ${scope === 'all' ? 'any project' : 'this project'} was found under ${locator.root}.`
   }
   const shown = sessions.slice(0, options.limit)
   const parts: string[] = []
   for (const session of shown) {
     const lines = (await host.lineCount(session.path)).toLocaleString('en-US')
     const windows = (await windowStarts(host, locator.kind, session.path)).length
-    const title = await options.titleOf(session.id)
+    const title = await options.titleOf(session.id, session.key)
     const prompt = firstPrompt(await host.readLines(session.path, 1, PREVIEW_LINES))
     parts.push(
       [
         `- \`${session.id}\`${mine(session)}: updated ${utcMinute(session.mtimeMs)}, ${lines} lines, ${windows} windows, ${session.agents.length} subagents`,
+        scope === 'all' ? `  project: ${session.project}` : undefined,
         title === '' ? undefined : `  note: ${title}`,
         prompt === undefined ? undefined : `  first prompt: ${prompt}`,
       ]
@@ -282,27 +339,36 @@ Pass "session" as "${ALL_SESSIONS}" to list every session of this project.`
     )
   }
 
-  return `${LIST_HEADER} of this project, newest first (${shown.length} of ${sessions.length}). Pass a session id as "session" for its context windows and subagents.
+  return `${LIST_HEADER} of ${scope === 'all' ? 'all projects' : 'this project'}, newest first (${shown.length} of ${sessions.length}). Pass a session id as "session" for its context windows and subagents.
 
 ${parts.join('\n')}`
 }
 
-/** What `history_search` answers: messages of one session, or of every session newest first, that contain `query`, ignoring case. */
+/**
+ * What `history_search` answers: messages of one session, or of every session of the project or of
+ * every project newest first, that contain `query`, ignoring case.
+ */
 export async function historySearchText(
   host: Host,
   locator: Locator,
-  options: { query: string; session?: string; limit: number },
+  options: { query: string; session?: string; allProjects?: boolean; limit: number },
 ): Promise<string> {
   const query = options.query.trim()
   if (query === '') {
     return 'Pass "query" as the text to find.'
   }
-  const sessions = await projectSessions(host, locator)
-  const named = options.session ?? locator.sessionId
+  const named = namedSession(locator, options)
   const isAll = named === ALL_SESSIONS
-  const targets = isAll ? sessions : sessions.filter(session => sameSession(session.id, named))
-  if (!isAll && targets.length === 0) {
-    return unknownSession(named)
+  const scope: Scope = options.allProjects === true ? 'all' : 'project'
+  let targets: Session[]
+  if (isAll) {
+    targets = await sessionsIn(host, locator, scope)
+  } else {
+    const session = await findSession(host, locator, named)
+    if (session === undefined) {
+      return unknownSession(named)
+    }
+    targets = [session]
   }
   // The transcript holds the text JSON-encoded, so the raw lines are matched that way and the rendered message confirms it.
   const needle = JSON.stringify(query).slice(1, -1)
@@ -329,13 +395,14 @@ export async function historySearchText(
         const to = Math.min(at + query.length + SNIPPET_CHARS, rendered.length)
         const snippet = `${from > role.length + 2 ? '…' : ''}${rendered.slice(from, to).replace(/\s+/g, ' ')}${to < rendered.length ? '…' : ''}`
         const agent = file.agent === undefined ? '' : ` agent \`${file.agent}\``
-        results.push(`- \`${session.id}\`${agent} window #${windowOf(starts, hit.number)} L${hit.number} ${role}: ${snippet}`)
+        const project = isAll && scope === 'all' ? ` [${session.project}]` : ''
+        results.push(`- \`${session.id}\`${project}${agent} window #${windowOf(starts, hit.number)} L${hit.number} ${role}: ${snippet}`)
       }
     }
   }
   if (results.length === 0) {
     return isAll
-      ? `${SEARCH_HEADER} "${query}": no message matches in any session.`
+      ? `${SEARCH_HEADER} "${query}": no message matches in any session${scope === 'all' ? ' of any project' : ''}.`
       : `${SEARCH_HEADER} "${query}": no message matches in session \`${named}\`. Pass "session" as "${ALL_SESSIONS}" to search every session of this project.`
   }
   const more = isMore ? `\n\n[more matches: narrow the query${isAll ? ', pass a session id as "session",' : ''} or raise "limit"]` : ''
@@ -356,7 +423,7 @@ export async function historyReadText(
     return `Pass "to_line" at or after "from_line" (L${from}).`
   }
   const named = options.session ?? locator.sessionId
-  const session = (await projectSessions(host, locator)).find(candidate => sameSession(candidate.id, named))
+  const session = await findSession(host, locator, named)
   if (session === undefined) {
     return unknownSession(named)
   }
@@ -401,44 +468,51 @@ ${footer}`
 
 const SESSION_PROPERTY = {
   type: 'string',
-  description: "A session id from history_list; defaults to this session.",
+  description: "A session id of any project, from history_list or history_search; defaults to this session.",
+}
+
+const ALL_PROJECTS_PROPERTY = {
+  type: 'boolean',
+  description: `Cover the sessions of every project instead of this one, as with session "${ALL_SESSIONS}" when no session is given; slower. Use it when the person refers to work done in another project.`,
 }
 
 /** The history tools by name: what each does and the input it takes, without the plugin's own properties. */
 export const HISTORY_TOOLS = {
   history_list: {
     description:
-      `List the context windows by line range and the subagents of this session or another session of this project; or, with session "${ALL_SESSIONS}", this project's sessions, newest first, with each one's context window count, subagent count, note title and first prompt.`,
+      `List the context windows by line range and the subagents of this session or another session of any project; or, with session "${ALL_SESSIONS}", this project's sessions, or with all_projects every project's, newest first, with each one's context window count, subagent count, note title and first prompt.`,
     properties: {
       session: {
         type: 'string',
-        description: `A session id, to list its context windows and subagents, or "${ALL_SESSIONS}" to list every session of this project; defaults to this session.`,
+        description: `A session id of any project, to list its context windows and subagents, or "${ALL_SESSIONS}" to list every session of this project; defaults to this session.`,
       },
+      all_projects: ALL_PROJECTS_PROPERTY,
       limit: {
         type: 'integer',
         minimum: 1,
         maximum: MAX_RESULTS,
-        description: `How many sessions to list with session "${ALL_SESSIONS}", where it alone applies; ${DEFAULT_LIST_LIMIT} by default.`,
+        description: `How many sessions to list with session "${ALL_SESSIONS}" or all_projects, where it alone applies; ${DEFAULT_LIST_LIMIT} by default.`,
       },
     },
     required: [] as string[],
   },
   history_search: {
     description:
-      "Find the original messages of this session and its subagents, or of another session of this project, that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read. When a note or summary lacks a detail you need, such as an exact command, error message or file content, look it up here instead of guessing.",
+      "Find the original messages of this session and its subagents, or of another session of any project, that contain a text, ignoring case: user prompts, replies, tool calls and tool results, compacted or not. Each match gives the session, agent, context window and line to read around with history_read. When a note or summary lacks a detail you need, such as an exact command, error message or file content, look it up here instead of guessing.",
     properties: {
       query: { type: 'string', description: 'The literal text to find, such as an error message, a path or a command.' },
       session: {
         type: 'string',
-        description: `A session id from history_list to search that session and its subagents, or "${ALL_SESSIONS}" for every session of this project; defaults to this session.`,
+        description: `A session id of any project, from history_list, to search that session and its subagents, or "${ALL_SESSIONS}" for every session of this project; defaults to this session.`,
       },
+      all_projects: ALL_PROJECTS_PROPERTY,
       limit: { type: 'integer', minimum: 1, maximum: MAX_RESULTS, description: `How many matches to return; ${DEFAULT_SEARCH_LIMIT} by default.` },
     },
     required: ['query'],
   },
   history_read: {
     description:
-      "Read the original messages of a session of this project, or of one of its subagents, a page at a time, between two transcript lines: around a match history_search gave, or over a context window's lines from history_list.",
+      "Read the original messages of a session of any project, or of one of its subagents, a page at a time, between two transcript lines: around a match history_search gave, or over a context window's lines from history_list.",
     properties: {
       session: SESSION_PROPERTY,
       agent: { type: 'string', description: "A subagent id from history_list or history_search, to read that subagent's transcript." },
@@ -478,15 +552,16 @@ export function runHistoryTool(
   host: Host,
   locator: Locator,
   input: Record<string, unknown>,
-  titleOf: (sessionId: string) => Promise<string>,
+  titleOf: TitleOf,
 ): Promise<string> {
   const limit = (fallback: number) => Math.min(countInput(input, 'limit') ?? fallback, MAX_RESULTS)
   const session = textInput(input, 'session')
+  const allProjects = input.all_projects === true
   switch (name) {
     case 'history_list':
-      return historyListText(host, locator, { session, limit: limit(DEFAULT_LIST_LIMIT), titleOf })
+      return historyListText(host, locator, { session, allProjects, limit: limit(DEFAULT_LIST_LIMIT), titleOf })
     case 'history_search':
-      return historySearchText(host, locator, { query: textInput(input, 'query') ?? '', session, limit: limit(DEFAULT_SEARCH_LIMIT) })
+      return historySearchText(host, locator, { query: textInput(input, 'query') ?? '', session, allProjects, limit: limit(DEFAULT_SEARCH_LIMIT) })
     case 'history_read':
       return historyReadText(host, locator, {
         session,

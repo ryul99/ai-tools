@@ -43,10 +43,10 @@ export const RESET_INSTRUCTIONS = `${MARKER} new_context`
 export const CONTINUE_PROMPT = `${MARKER} The context was reset to your handoff note at your request. Continue the task from the note.`
 
 /** The system prompt section that sets the note-keeping protocol for the session. */
-export function guidanceSection(options: { concept: string; root: string }): string {
+export function guidanceSection(options: { note: string }): string {
   return `# Context management
 
-This session keeps a handoff note, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. When the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. A subagent leaves this note alone and is given one of its own once its work runs long.
+This session keeps a handoff note, \`${options.note}\`. When the context is reset or compacted, the conversation is replaced by this note, while the original messages stay in the session's transcript. A subagent leaves this note alone and is given one of its own once its work runs long.
 
 - Keep the note current as you work, in the language of the conversation. ${NOTE_UPKEEP} Every context window starts by reading all of it, so what is outdated costs room and misleads. When and how you update it is your call, and the person does not need to hear about it.
 - ${NOTE_CONTENT}
@@ -54,22 +54,22 @@ This session keeps a handoff note, the OKF concept \`${options.concept}\` in the
 }
 
 /** Given to a subagent once its work runs long, never at its start, so a short subagent is left as it is. */
-export function agentGuidance(options: { concept: string; root: string; sessionSlug: string; agentId: string }): string {
-  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. When your context fills up, compaction leaves only a summary and you are told the note is there to read.
+export function agentGuidance(options: { note: string; sessionNote: string; agentId: string }): string {
+  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, \`${options.note}\`. When your context fills up, compaction leaves only a summary and you are told the note is there to read.
 
-Keep it current with \`${toolId(TOOL.append)}\` and \`${toolId(TOOL.write)}\`, which write your own note. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it. \`${toolId(TOOL.read)}\` with handoff "${options.sessionSlug}" reads the main agent's note, and \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" your own original messages.`
+Keep it current with \`${toolId(TOOL.append)}\` and \`${toolId(TOOL.write)}\`, which write your own note. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it. \`${toolId(TOOL.read)}\` with handoff "${options.sessionNote}" reads the main agent's note, and \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" your own original messages.`
 }
 
 /**
  * What a subagent is told after Claude Code compacted it: that its note is
  * there to read, not the note itself, which would repeat much of the summary.
  */
-export function agentCompactedNotice(options: { concept: string; modified: string; agentId: string }): string {
-  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${options.concept}\`, last updated ${options.modified}. Read it with \`${toolId(TOOL.read)}\` before you continue, when the summary leaves out something you need; \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your original messages.`
+export function agentCompactedNotice(options: { note: string; modified: string; agentId: string }): string {
+  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${options.note}\`, last updated ${options.modified}. Read it with \`${toolId(TOOL.read)}\` before you continue, when the summary leaves out something you need; \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" reads your original messages.`
 }
 
 export function plannerPrompt(options: {
-  concept: string
+  note: string
   current: string
   instructions: string | undefined
   recentResults: string | undefined
@@ -87,7 +87,7 @@ export function plannerPrompt(options: {
       ? ''
       : `\nThese tool results arrived after the last request above, so they may be missing from it:\n<recent-tool-results>\n${options.recentResults}\n</recent-tool-results>\n`
 
-  return `This message comes from the ${PLUGIN} plugin, not from the user. The context window is full, so the conversation above is about to be replaced by your handoff note \`${options.concept}\`. Set the task aside and answer only with the note, brought up to date with the whole conversation.
+  return `This message comes from the ${PLUGIN} plugin, not from the user. The context window is full, so the conversation above is about to be replaced by your handoff note \`${options.note}\`. Set the task aside and answer only with the note, brought up to date with the whole conversation.
 
 ${current}
 

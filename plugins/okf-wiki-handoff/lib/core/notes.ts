@@ -1,4 +1,4 @@
-import { HANDOFF_TAG, HANDOFF_TYPE, isRecord } from './common.ts'
+import { HANDOFF_DIR, HANDOFF_TAG, HANDOFF_TYPE, isRecord, noteName } from './common.ts'
 
 export type DirEntry = { name: string; kind: 'file' | 'dir' | 'other'; mtimeMs: number }
 
@@ -120,7 +120,7 @@ export async function writeNote(
 
 /** What `handoff_write` and `handoff_append` answer. The size is there for the agent to judge when the note needs tidying. */
 export function savedText(concept: string, options: { isAppend: boolean; chars: number }): string {
-  return `${options.isAppend ? 'Appended to' : 'Saved'} ${concept}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
+  return `${options.isAppend ? 'Appended to' : 'Saved'} ${noteName(concept)}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
 }
 
 export function utcMinute(ms: number): string {
@@ -131,26 +131,33 @@ export function utcMinute(ms: number): string {
 export async function noteText(store: Store, concept: string): Promise<string> {
   const note = await readNote(store, concept)
   if (note === undefined) {
-    return `${concept} has not been written yet.`
+    return `${noteName(concept)} has not been written yet.`
   }
   const title = await noteTitle(store, concept)
-  const heading = title === '' ? concept : `${concept} (${title})`
+  const heading = title === '' ? noteName(concept) : `${noteName(concept)} (${title})`
 
   return `${heading}\n\n${note.body.trim() || '(empty)'}`
 }
 
-/** What `handoff_search` answers: the project's matching notes, most relevant first, each with its best matching lines. */
-export async function searchNotesText(store: Store, folder: string, query: string, limit: number): Promise<string> {
-  if (!(await store.host.exists(`${store.root}/${folder}`))) {
-    return 'No handoff note has been written in this project yet.'
+/** What `handoff_search` answers: the matching notes of the project or of every project, most relevant first, each with its best matching lines. */
+export async function searchNotesText(
+  store: Store,
+  folder: string,
+  query: string,
+  limit: number,
+  allProjects = false,
+): Promise<string> {
+  const scope = allProjects ? HANDOFF_DIR : folder
+  if (!(await store.host.exists(`${store.root}/${scope}`))) {
+    return allProjects ? 'No handoff note has been written yet.' : 'No handoff note has been written in this project yet.'
   }
   const found = await okf(store, ['search', query, '--tag', HANDOFF_TAG, '--limit', String(SEARCH_CANDIDATES), '--with-matches'])
   const notes = (Array.isArray(found) ? found : []).filter(
     (concept): concept is Record<string, unknown> & { id: string; matches: unknown[] } =>
-      isRecord(concept) && typeof concept.id === 'string' && concept.id.startsWith(`${folder}/`) && Array.isArray(concept.matches),
+      isRecord(concept) && typeof concept.id === 'string' && concept.id.startsWith(`${scope}/`) && Array.isArray(concept.matches),
   )
   if (notes.length === 0) {
-    return `No handoff note of this project matches "${query}".`
+    return `No handoff note of ${allProjects ? 'any project' : 'this project'} matches "${query}".`
   }
   const parts = notes.slice(0, limit).map(({ id, title, matches }) => {
     const useful = matches.filter(isRecord).filter((match) => !UNINFORMATIVE_FIELDS.has(String(match.field)))
@@ -163,7 +170,7 @@ export async function searchNotesText(store: Store, folder: string, query: strin
       lines.push(`  (+${useful.length - lines.length} more)`)
     }
 
-    return [`- \`${id.slice(folder.length + 1)}\`${typeof title === 'string' ? ` (${title})` : ''}`, ...lines].join('\n')
+    return [`- \`${noteName(id)}\`${typeof title === 'string' ? ` (${title})` : ''}`, ...lines].join('\n')
   })
   const more = notes.length > parts.length ? `\n\n[${notes.length - parts.length} more notes: narrow the query or raise limit]` : ''
 

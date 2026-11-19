@@ -15,13 +15,15 @@ import { createInterface } from 'node:readline'
 import {
   BUNDLE_NAME,
   DEFAULT_REMIND_TOKENS,
+  HANDOFF_DIR,
   MARKER,
-  NOTE_SLUG_PATTERN,
   agentConcept,
   errorText,
   handoffFolder,
   isRecord,
+  nameConcept,
   noteConcept,
+  noteName,
   parsePositive,
 } from '../lib/core/common.ts'
 import { HISTORY_TOOLS, isHistoryTool, runHistoryTool } from '../lib/core/history.ts'
@@ -401,23 +403,27 @@ async function observe(state: State, store: Store, usage: Usage | undefined, isA
 // ---------------------------------------------------------------------------
 // Hook messages
 
-function guidance(concept: string, root: string): string {
-  return `${MARKER} This session keeps a handoff note, the OKF concept \`${concept}\` in the bundle \`${root}\`. After a compaction its first ${MAX_INJECTED_NOTE_CHARS.toLocaleString('en-US')} characters are shown to you again beside the summary, while the original messages stay in the session's transcript.
+function guidance(concept: string): string {
+  const name = noteName(concept)
+
+  return `${MARKER} This session keeps a handoff note, \`${name}\`. After a compaction its first ${MAX_INJECTED_NOTE_CHARS.toLocaleString('en-US')} characters are shown to you again beside the summary, while the original messages stay in the session's transcript.
 
 Keep the note current without being asked, in the language of the conversation. ${NOTE_UPKEEP} What is outdated in it costs room and misleads. When and how you update it is your call, and the person does not need to hear about it.
 
 ${NOTE_CONTENT}
 
-The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write, read and search the notes, each called with note="${concept}", and its \`history_*\` tools reach the original messages. Load them with tool search if they are not loaded yet.`
+The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write, read and search the notes, each called with note="${name}", and its \`history_*\` tools reach the original messages. Load them with tool search if they are not loaded yet.`
 }
 
 /** Given to a subagent once its work runs long or its context is compacted, never at its start. */
-function agentGuidance(options: { concept: string; sessionConcept: string; root: string; sessionId: string; agentId: string }): string {
-  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, the OKF concept \`${options.concept}\` in the bundle \`${options.root}\`. After a compaction only a summary of your conversation remains and you are told the note is there to read.
+function agentGuidance(options: { concept: string; sessionConcept: string; sessionId: string; agentId: string }): string {
+  const name = noteName(options.concept)
+
+  return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, \`${name}\`. After a compaction only a summary of your conversation remains and you are told the note is there to read.
 
 Keep it current without being asked, in the language of your task. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it.
 
-The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write and read the notes, each called with note="${options.concept}"; load them with tool search if they are not loaded yet. The main agent's note \`${options.sessionConcept}\` is yours to read but never to write, and \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages.`
+The \`handoff_*\` tools of the \`${SERVER_NAME}\` MCP server write and read the notes, each called with note="${name}"; load them with tool search if they are not loaded yet. The main agent's note \`${noteName(options.sessionConcept)}\` is yours to read but never to write, and \`history_read\` with session="${options.sessionId}" and agent="${options.agentId}" reads your own original messages.`
 }
 
 async function compactedText(store: Store, concept: string): Promise<string> {
@@ -441,7 +447,9 @@ async function compactedText(store: Store, concept: string): Promise<string> {
  * read, not the note itself, which would repeat much of the summary.
  */
 function agentCompactedNotice(concept: string, modifiedMs: number): string {
-  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${concept}\`, last updated ${utcMinute(modifiedMs)}. Read it with \`handoff_read\` and note="${concept}" before you continue, when the summary leaves out something you need; load the \`${SERVER_NAME}\` tools with tool search first if they are not loaded.`
+  const name = noteName(concept)
+
+  return `${MARKER} Your context was just compacted. You keep a handoff note, \`${name}\`, last updated ${utcMinute(modifiedMs)}. Read it with \`handoff_read\` and note="${name}" before you continue, when the summary leaves out something you need; load the \`${SERVER_NAME}\` tools with tool search first if they are not loaded.`
 }
 
 /** A nudge once `interval` tokens of work have passed since the note last changed, repeated after every further interval. */
@@ -453,7 +461,7 @@ function reminder(concept: string, tokens: number, state: State, interval: numbe
   }
   state.reminded_tokens = tokens
 
-  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${concept}\` was last updated. Bring it up to date at the next good point.`
+  return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${noteName(concept)}\` was last updated. Bring it up to date at the next good point.`
 }
 
 // ---------------------------------------------------------------------------
@@ -473,7 +481,7 @@ function sessionNote(payload: Record<string, unknown>, state: State, sessionId: 
 }
 
 async function onSessionStart(payload: Record<string, unknown>, state: State, store: Store, concept: string): Promise<HookOutput> {
-  let text = guidance(concept, store.root)
+  let text = guidance(concept)
   state.guided = true
   const source = payload.source
   const isNew = source === 'startup' || source === 'clear' || source === 'fork'
@@ -574,7 +582,7 @@ async function runAgentHook(
     const message = reminder(concept, tokens, state, remindTokens())
     if (message !== undefined && state.guided !== true) {
       state.guided = true
-      messages.push(agentGuidance({ concept, sessionConcept, root: store.root, sessionId, agentId }))
+      messages.push(agentGuidance({ concept, sessionConcept, sessionId, agentId }))
     } else if (message !== undefined) {
       messages.push(message)
     }
@@ -660,7 +668,7 @@ async function runHook(dataDir: string, input: string): Promise<HookOutput> {
       if (state.guided !== true) {
         // A session that started before the plugin was enabled never saw the guidance.
         state.guided = true
-        message = `${message}\n\n${guidance(concept, store.root)}`
+        message = `${message}\n\n${guidance(concept)}`
       }
       output = hookContext(event, message)
     }
@@ -689,7 +697,7 @@ async function logError(dataDir: string, error: unknown): Promise<void> {
 
 const NOTE_PROPERTY = {
   type: 'string',
-  description: "Your handoff note's concept id, as your okf-wiki-handoff instructions give it: the session's, or a subagent's own.",
+  description: "Your handoff note's name, <project-key>/<slug>, as your okf-wiki-handoff instructions give it: the session's, or a subagent's own.",
 }
 
 function withNote(properties: Record<string, unknown>, required: readonly string[]): Record<string, unknown> {
@@ -707,7 +715,7 @@ const TOOLS = [
   {
     name: 'handoff_read',
     description:
-      "Read your okf-wiki-handoff note, or another note of this project: pass that note's concept id as note.",
+      "Read your okf-wiki-handoff note, or another note of any project: pass that note's name, <project-key>/<slug>, as note.",
     inputSchema: withNote({}, []),
   },
   {
@@ -725,10 +733,14 @@ const TOOLS = [
   {
     name: 'handoff_search',
     description:
-      "Find the okf-wiki-handoff notes of this project that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
+      "Find the okf-wiki-handoff notes of this project, or of every project, that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
     inputSchema: withNote(
       {
         query: { type: 'string', description: 'The text to find.' },
+        all_projects: {
+          type: 'boolean',
+          description: 'Cover the notes of every project instead of this one. Use it when the person refers to work done in another project.',
+        },
         limit: { type: 'integer', minimum: 1, maximum: MAX_SEARCH_RESULTS, description: 'How many notes to return; 20 by default.' },
       },
       ['query'],
@@ -744,14 +756,13 @@ const TOOLS = [
 /** The note a tool names, and the project folder and session it belongs to, a subagent's note its session's. */
 function checkedNote(input: Record<string, unknown>): { concept: string; folder: string; key: string; sessionSlug: string } {
   const note = input.note
-  const match = typeof note === 'string' ? /^handoff\/([A-Za-z0-9-]+)\/(.+)$/.exec(note) : null
-  const key = match?.[1]
-  const slug = match?.[2]
-  if (typeof note !== 'string' || key === undefined || slug === undefined || !NOTE_SLUG_PATTERN.test(slug)) {
-    throw new Error('Pass "note" as the handoff concept id, such as handoff/<project-key>/<session-id>.')
+  const concept = typeof note === 'string' ? nameConcept(note) : undefined
+  if (typeof note !== 'string' || concept === undefined) {
+    throw new Error('Pass "note" as a handoff note name, <project-key>/<slug>, such as your instructions give.')
   }
+  const [key = '', slug = ''] = note.split('/')
 
-  return { concept: note, folder: `handoff/${key}`, key, sessionSlug: slug.split('/')[0] ?? slug }
+  return { concept, folder: `${HANDOFF_DIR}/${key}`, key, sessionSlug: slug }
 }
 
 function requiredText(input: Record<string, unknown>, key: string, what: string): string {
@@ -794,7 +805,13 @@ const TOOL_HANDLERS: Record<string, (server: Server, input: Record<string, unkno
     const { folder } = checkedNote(input)
     const limit = typeof input.limit === 'number' && Number.isInteger(input.limit) && input.limit > 0 ? input.limit : 20
 
-    return searchNotesText(store, folder, requiredText(input, 'query', 'the text to find'), Math.min(limit, MAX_SEARCH_RESULTS))
+    return searchNotesText(
+      store,
+      folder,
+      requiredText(input, 'query', 'the text to find'),
+      Math.min(limit, MAX_SEARCH_RESULTS),
+      input.all_projects === true,
+    )
   },
 }
 
@@ -806,10 +823,12 @@ async function callTool(server: Server, name: string, input: Record<string, unkn
   if (!isHistoryTool(name)) {
     return undefined
   }
-  const { folder, key, sessionSlug } = checkedNote(input)
+  const { key, sessionSlug } = checkedNote(input)
   const locator: Locator = { kind: server.host, root: transcriptRoot(server.host), key, sessionId: sessionSlug }
 
-  return await runHistoryTool(name, nodeHost, locator, input, sessionId => noteTitle(server.store, noteConcept(folder, sessionId)))
+  return await runHistoryTool(name, nodeHost, locator, input, (sessionId, sessionKey) =>
+    noteTitle(server.store, noteConcept(`${HANDOFF_DIR}/${sessionKey}`, sessionId)),
+  )
 }
 
 async function mcpResponse(request: Record<string, unknown>, server: Server): Promise<unknown> {

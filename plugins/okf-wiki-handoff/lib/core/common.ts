@@ -26,6 +26,18 @@ export function sessionSlug(sessionId: string): string {
   return sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 }
 
+/** A note's name as agents see it, `<project-key>/<slug>`: its concept id without the bundle folder. */
+export function noteName(concept: string): string {
+  return concept.startsWith(`${HANDOFF_DIR}/`) ? concept.slice(HANDOFF_DIR.length + 1) : concept
+}
+
+/** The concept id of a note named `<project-key>/<slug>`, or `undefined` for any other name. */
+export function nameConcept(name: string): string | undefined {
+  const match = /^[A-Za-z0-9-]+\/(.+)$/.exec(name)
+
+  return match?.[1] !== undefined && NOTE_SLUG_PATTERN.test(match[1]) ? `${HANDOFF_DIR}/${name}` : undefined
+}
+
 /** The note concept of a session in a project folder. */
 export function noteConcept(folder: string, sessionId: string): string {
   return `${folder}/${sessionSlug(sessionId)}`

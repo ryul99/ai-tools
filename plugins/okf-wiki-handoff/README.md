@@ -2,7 +2,7 @@
 
 Keeps session notes so Codex and Claude Code can continue work after context
 compaction. The agent can also find notes and search past conversations from
-the same project.
+the same project or from every project.
 
 ## Installation
 
@@ -44,7 +44,11 @@ To resume earlier work or recover a detail, ask the agent, for example:
 ```text
 Continue the task from this project's previous handoff notes.
 Find the exact command we ran in the previous session.
+Find how we set up the release workflow in my other projects.
 ```
+
+Searches cover the current project by default; the agent can search every
+project's notes and conversations when you refer to other projects.
 
 ## Stored data
 
@@ -57,6 +61,8 @@ Notes stay separate from your knowledge wiki:
 
 `OKF_ROOT` does not change this location. To inspect notes manually, use
 `okf --root ~/.claude/okf-handoff list` or the corresponding Codex path.
+The agent names a note `<project-key>/<slug>`; it is the concept
+`handoff/<project-key>/<slug>` in the bundle.
 
 Past conversations are available only while the CLI retains their transcripts.
 Notes are working state; move durable conclusions into your wiki separately.

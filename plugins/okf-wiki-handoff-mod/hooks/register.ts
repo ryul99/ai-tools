@@ -9,12 +9,14 @@ import type {
 import {
   BUNDLE_NAME,
   DEFAULT_REMIND_TOKENS,
-  NOTE_SLUG_PATTERN,
+  HANDOFF_DIR,
   agentConcept,
   errorText,
   handoffFolder,
   isRecord,
+  nameConcept,
   noteConcept,
+  noteName,
   parsePositive,
   projectKey,
 } from './core/common.ts'
@@ -101,7 +103,7 @@ const NOTE_SCHEMA = {
   properties: {
     handoff: {
       type: 'string',
-      description: "A handoff slug of this project, as handoff_search gives it; omit it for this session's own note.",
+      description: "A handoff note's name, <project-key>/<slug>, as handoff_search gives it; omit it for this session's own note.",
     },
   },
 }
@@ -130,6 +132,10 @@ const SEARCH_SCHEMA = {
   type: 'object',
   properties: {
     query: { type: 'string', description: 'The text to find.' },
+    all_projects: {
+      type: 'boolean',
+      description: 'Cover the notes of every project instead of this one. Use it when the person refers to work done in another project.',
+    },
     limit: {
       type: 'integer',
       minimum: 1,
@@ -149,7 +155,7 @@ const HISTORY_TOOL_NAMES = [
 const TOOLS = [
   {
     name: TOOL.read,
-    description: "Read this session's handoff note, or another handoff note of this project by its slug.",
+    description: "Read this session's handoff note, or another handoff note of any project by its name.",
     inputSchema: NOTE_SCHEMA,
   },
   {
@@ -167,7 +173,7 @@ const TOOLS = [
   {
     name: TOOL.search,
     description:
-      "Find the handoff notes of this project that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
+      "Find the handoff notes of this project, or of every project, that mention a text, most relevant first, with their best matching lines. When the person continues an earlier task, find that task's note here and carry what still holds into your own.",
     inputSchema: SEARCH_SCHEMA,
   },
   {
@@ -418,7 +424,7 @@ async function guidanceFor($: EngineInterface): Promise<string | undefined> {
     if (place === undefined) {
       return undefined
     }
-    const text = guidanceSection({ concept: noteConcept(place.folder, sessionId), root: place.store.root })
+    const text = guidanceSection({ note: noteName(noteConcept(place.folder, sessionId)) })
     runtime.guidance = { sessionId, text }
   }
 
@@ -495,9 +501,8 @@ async function dueAgentReminder($: EngineInterface, agentId: string): Promise<st
     }
     const sessionId = await $.session.id()
     text = agentGuidance({
-      concept: agentNote(place, sessionId, agentId),
-      root: place.store.root,
-      sessionSlug: noteConcept(place.folder, sessionId).slice(place.folder.length + 1),
+      note: noteName(agentNote(place, sessionId, agentId)),
+      sessionNote: noteName(noteConcept(place.folder, sessionId)),
       agentId,
     })
   }
@@ -530,7 +535,7 @@ async function replaceWithHandoff(
   if (current === '' || since >= FRESH_TOKENS) {
     const reply = await $.model.fork({
       prompt: plannerPrompt({
-        concept,
+        note: noteName(concept),
         current,
         instructions: isReset ? undefined : e.instructions,
         recentResults: recentToolResults(e.messages),
@@ -560,7 +565,7 @@ async function replaceWithHandoff(
     prompt: !isReset && tail.length === 0 ? latestPrompt(e.messages) : undefined,
     window,
   })
-  $.ui.toast(`okf handoff: context window #${window} starts from ${concept}`)
+  $.ui.toast(`okf handoff: context window #${window} starts from ${noteName(concept)}`)
 
   return { messages: [{ role: 'user', text, toolUses: [] }, ...tail] }
 }
@@ -593,7 +598,7 @@ async function noticeAgentNote(
   // The summary is the message the compaction made, ahead of the ones it kept.
   const summary = result.messages.findIndex(message => message.handle === undefined || !before.has(message.handle))
   const at = (summary === -1 ? 0 : summary) + 1
-  const text = agentCompactedNotice({ concept, modified: utcMinute(modifiedMs), agentId })
+  const text = agentCompactedNotice({ note: noteName(concept), modified: utcMinute(modifiedMs), agentId })
 
   return {
     ...result,
@@ -637,19 +642,20 @@ async function ownConcept($: EngineInterface, place: Place, agentId: string | un
   return agentId === undefined ? noteConcept(place.folder, sessionId) : agentNote(place, sessionId, agentId)
 }
 
-/** The note a tool names by its `handoff` slug, or the caller's own; a string when the input is unusable. */
+/** The note a tool names by its `handoff` name, or the caller's own; a string when the input is unusable. */
 async function namedConcept(
   $: EngineInterface,
   place: Place,
   input: Record<string, unknown>,
   agentId: string | undefined,
 ): Promise<{ concept: string } | string> {
-  const slug = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
-  if (slug !== undefined && !NOTE_SLUG_PATTERN.test(slug)) {
-    return 'Pass "handoff" as a slug that handoff_search gave.'
+  const named = typeof input.handoff === 'string' && input.handoff !== '' ? input.handoff : undefined
+  if (named === undefined) {
+    return { concept: await ownConcept($, place, agentId) }
   }
+  const concept = nameConcept(named)
 
-  return { concept: slug === undefined ? await ownConcept($, place, agentId) : `${place.folder}/${slug}` }
+  return concept === undefined ? 'Pass "handoff" as a note name, <project-key>/<slug>, that handoff_search gave.' : { concept }
 }
 
 async function readTool($: EngineInterface, input: Record<string, unknown>, agentId: string | undefined): Promise<string> {
@@ -714,7 +720,7 @@ async function searchTool($: EngineInterface, input: Record<string, unknown>): P
   }
   const limit = typeof input.limit === 'number' && Number.isInteger(input.limit) && input.limit > 0 ? input.limit : DEFAULT_NOTE_SEARCH_LIMIT
 
-  return searchNotesText(place.store, place.folder, query, Math.min(limit, MAX_SEARCH_RESULTS))
+  return searchNotesText(place.store, place.folder, query, Math.min(limit, MAX_SEARCH_RESULTS), input.all_projects === true)
 }
 
 async function remainingTool($: EngineInterface, agentId: string | undefined): Promise<string> {
@@ -739,8 +745,8 @@ async function transcriptLocator($: EngineInterface): Promise<Locator> {
 async function historyTool($: EngineInterface, name: HistoryToolName, input: Record<string, unknown>): Promise<string> {
   const locator = await transcriptLocator($)
   const place = await handoffPlace($, false)
-  const titleOf = (sessionId: string) =>
-    place === undefined ? Promise.resolve('') : noteTitle(place.store, noteConcept(place.folder, sessionId))
+  const titleOf = (sessionId: string, key: string) =>
+    place === undefined ? Promise.resolve('') : noteTitle(place.store, noteConcept(`${HANDOFF_DIR}/${key}`, sessionId))
 
   return runHistoryTool(name, engineHost($), locator, input, titleOf)
 }

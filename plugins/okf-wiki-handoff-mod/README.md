@@ -2,7 +2,8 @@
 
 An experimental Claude Code mod that keeps session notes and lets the agent
 continue work in a fresh context using those notes. It also supports searching
-past conversations from the same project, including subagent conversations.
+past conversations from the same project or from every project, including
+subagent conversations.
 
 Unlike [`okf-wiki-handoff`](../okf-wiki-handoff/README.md), this mod uses the
 note in place of the CLI's usual compaction summary. Choose the hook plugin
@@ -38,7 +39,11 @@ To resume earlier work or recover a detail, ask the agent, for example:
 ```text
 Continue the task from this project's previous handoff notes.
 Find the exact command we ran in the previous session.
+Find how we set up the release workflow in my other projects.
 ```
+
+Searches cover the current project by default; the agent can search every
+project's notes and conversations when you refer to other projects.
 
 Long-running subagents keep separate notes, but use normal compaction and
 cannot start fresh contexts themselves.
@@ -52,6 +57,9 @@ Notes stay separate from your knowledge wiki in
 ```sh
 okf --root ~/.claude/okf-handoff list
 ```
+
+The agent names a note `<project-key>/<slug>`; it is the concept
+`handoff/<project-key>/<slug>` in the bundle.
 
 Past conversations are available only while Claude Code retains their
 transcripts. Notes are working state; move durable conclusions into your wiki
