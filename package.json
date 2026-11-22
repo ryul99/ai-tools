@@ -17,8 +17,8 @@
   },
   "pi": {
     "extensions": [
-      "plugins/english-lecturer/pi/index.ts",
-      "plugins/okf-wiki-handoff/pi/index.ts"
+      "plugins/english-lecturer/pi/english-lecturer.ts",
+      "plugins/okf-wiki-handoff/pi/okf-wiki-handoff.ts"
     ],
     "skills": [
       "plugins/okf-wiki/skills",
