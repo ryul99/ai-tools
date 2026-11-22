@@ -77,6 +77,8 @@ want. Both extensions are enabled by default.
 
 - For `okf-wiki` or `okf-wiki-handoff`, install `okf` 0.2.0 or newer using
   the command below. The Pi extension does not install external software.
+  Pi Handoff uses the note in place of the default compaction summary and
+  can resume work from the note in a fresh context within the same session.
 - `english-lecturer` shows feedback above the editor in interactive Pi (or
   sends widget updates to RPC clients). It makes a separate model request
   with the prompt text and does not change the prompt sent to the coding

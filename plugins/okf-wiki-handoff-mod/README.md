@@ -5,9 +5,11 @@ continue work in a fresh context using those notes. It also supports searching
 past conversations from the same project or from every project, including
 subagent conversations.
 
-Unlike [`okf-wiki-handoff`](../okf-wiki-handoff/README.md), this mod uses the
-note in place of the CLI's usual compaction summary. Choose the hook plugin
-if you want to keep the usual summary.
+Unlike the Claude Code hook implementation of
+[`okf-wiki-handoff`](../okf-wiki-handoff/README.md), this mod uses the note in
+place of the CLI's usual compaction summary. Choose the hook plugin if you
+want to keep the usual summary. The Pi extension also supports note-based
+compaction and fresh contexts without this mod.
 
 ## Installation
 

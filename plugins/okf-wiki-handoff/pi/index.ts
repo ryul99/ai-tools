@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto'
 import { join } from 'node:path'
 
-import { getAgentDir, SessionManager, truncateHead, withFileMutationQueue } from '@earendil-works/pi-coding-agent'
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import { getAgentDir, SessionManager, SettingsManager, truncateHead, withFileMutationQueue } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, SessionProjection } from '@earendil-works/pi-coding-agent'
 import { Type } from 'typebox'
 
 import { BUNDLE_NAME, DEFAULT_REMIND_TOKENS, errorText, HANDOFF_DIR, MARKER, nameConcept, noteConcept, noteName, parsePositive, projectKey, SLUG_PATTERN } from '../lib/core/common.ts'
@@ -14,8 +14,9 @@ import { locateOkf } from '../lib/core/okf_cli.ts'
 import type { OkfCommand } from '../lib/core/okf_cli.ts'
 import { createNodeHost, runCommand } from '../lib/node-host.ts'
 
+import { CONTINUE_PROMPT, DEFAULT_MARGIN_PERCENT, FRESH_TOKENS, handoffSummary, keptHistory, refreshNote } from './compaction.ts'
+
 const ID = 'okf-wiki-handoff'
-const MAX_INJECTED_NOTE_CHARS = 8_000
 const MISSING_OKF = 'Install okf (0.2.0 or newer), then reload Pi to enable handoff notes.'
 
 function hash(text: string): string {
@@ -89,10 +90,13 @@ export default function (pi: ExtensionAPI) {
     root: join(getAgentDir(), BUNDLE_NAME),
     generatedBy: `process:${ID}`,
   }
-  let restoreText: string | undefined
+  let resetRequested = false
   let noteBaseline: number | undefined
-  let guided = false
-  const reminderInterval = Math.max(1, Math.trunc(parsePositive(process.env.OKF_HANDOFF_REMIND_TOKENS, DEFAULT_REMIND_TOKENS)))
+  let remindedAt: number | undefined
+  let urgentSent = false
+  const reminderInterval = parsePositive(process.env.OKF_HANDOFF_REMIND_TOKENS, DEFAULT_REMIND_TOKENS)
+  const margin = parsePositive(process.env.OKF_HANDOFF_MARGIN_PERCENT, DEFAULT_MARGIN_PERCENT)
+  const marginPercent = margin < 100 ? margin : DEFAULT_MARGIN_PERCENT
 
   function requireOkf() {
     if (!okf) {
@@ -100,21 +104,49 @@ export default function (pi: ExtensionAPI) {
     }
   }
 
-  async function restore(ctx: ExtensionContext) {
-    restoreText = undefined
-    if (!okf || !ctx.sessionManager.getSessionFile()) {
-      return
-    }
+  function enabled(ctx: ExtensionContext) {
+    return !!okf && !!ctx.sessionManager.getSessionFile() && pi.getActiveTools().includes('handoff_write')
+  }
+
+  function startWindow() {
+    resetRequested = false
+    noteBaseline = undefined
+    remindedAt = undefined
+    urgentSent = false
+  }
+
+  function save(concept: string, options: Parameters<typeof writeNote>[2]) {
+    return withFileMutationQueue(join(store.root, 'index.md'), () => writeNote(store, concept, options))
+  }
+
+  async function noteForCompaction(
+    ctx: ExtensionContext,
+    projection: SessionProjection,
+    options: { tokens?: number; instructions?: string; signal?: AbortSignal },
+  ) {
+    const concept = currentConcept(ctx)
+    const current = (await readNote(store, concept))?.body.trim() ?? ''
+    const fresh = options.tokens !== undefined && noteBaseline !== undefined && options.tokens - noteBaseline < FRESH_TOKENS
+    if (current && fresh && !options.instructions?.trim()) return { body: current, usage: undefined }
+
     try {
-      const body = (await readNote(store, currentConcept(ctx)))?.body.trim()
-      if (body) {
-        restoreText = body.length <= MAX_INJECTED_NOTE_CHARS
-          ? body
-          : `${body.slice(0, MAX_INJECTED_NOTE_CHARS)}\n[Clipped; read the full note with handoff_read.]`
-      }
+      const plan = await refreshNote(ctx, projection, { ...options, current })
+      await save(concept, plan)
+      return plan
     } catch (error) {
-      ctx.ui.notify(`${MARKER} Could not restore the note: ${errorText(error)}`, 'warning')
+      if (!current || options.signal?.aborted) throw error
+      ctx.ui.notify(`${MARKER} Could not refresh the handoff note; using the saved note: ${errorText(error)}`, 'warning')
+      return { body: current, usage: undefined }
     }
+  }
+
+  function contextLimits(ctx: ExtensionContext) {
+    const usage = ctx.getContextUsage()
+    if (!usage) return undefined
+    const { enabled, reserveTokens } = SettingsManager.create(ctx.cwd, getAgentDir(), {
+      projectTrusted: ctx.isProjectTrusted(),
+    }).getCompactionSettings(ctx.model)
+    return { ...usage, compactAt: enabled ? usage.contextWindow - reserveTokens : undefined }
   }
 
   pi.on('session_start', async (_event, ctx) => {
@@ -122,63 +154,116 @@ export default function (pi: ExtensionAPI) {
     if (!okf && ctx.hasUI && pi.getActiveTools().includes('handoff_write')) {
       ctx.ui.notify(`${MARKER} ${MISSING_OKF}`, 'warning')
     }
-    noteBaseline = ctx.getContextUsage()?.tokens ?? 0
-    if (ctx.sessionManager.getBranch().some(entry => entry.type === 'compaction')) {
-      await restore(ctx)
+  })
+
+  pi.on('session_tree', startWindow)
+  pi.on('session_compact', startWindow)
+  pi.on('agent_settled', () => { resetRequested = false })
+
+  pi.on('before_agent_start', (event, ctx) => {
+    if (!enabled(ctx)) return
+    const tools = pi.getActiveTools()
+    const guidance = [
+      `Keep this session's handoff note (\`${noteName(currentConcept(ctx))}\`) current in the language of the conversation. Use handoff_write to replace it, handoff_append to add to it, and handoff_read to review it. Compaction uses the note in place of Pi's default summary when possible. The original messages stay in the transcript. ${NOTE_UPKEEP}`,
+      NOTE_CONTENT,
+    ]
+    if (tools.includes('context_remaining')) guidance.push('Use context_remaining to plan long steps against the remaining context budget.')
+    if (tools.includes('new_context')) guidance.push('When little context remains or at a natural checkpoint late in the window, bring the note up to date, call new_context, and end with a one-line status. Work resumes automatically from the note.')
+    event.systemPromptOptions.sections[ID] = `# Context management\n\n${guidance.join('\n\n')}`
+  })
+
+  pi.on('session_before_compact', async (event, ctx) => {
+    if (!enabled(ctx)) return
+    try {
+      const projection = ctx.sessionManager.buildSessionProjection()
+      const { tokensBefore, firstKeptEntryId } = event.preparation
+      const note = await noteForCompaction(ctx, projection, {
+        tokens: tokensBefore, instructions: event.customInstructions, signal: event.signal,
+      })
+      event.signal.throwIfAborted()
+      const kept = keptHistory(projection, firstKeptEntryId, ctx.model?.contextWindow)
+      return { compaction: {
+        summary: handoffSummary(note.body, kept.prompt), firstKeptEntryId: kept.firstKeptEntryId,
+        tokensBefore, usage: note.usage, details: { handoff: ID },
+      } }
+    } catch (error) {
+      if (!event.signal.aborted) ctx.ui.notify(`${MARKER} Using Pi's default compaction: ${errorText(error)}`, 'warning')
     }
   })
 
-  pi.on('session_tree', async (_event, ctx) => {
-    guided = false
-    noteBaseline = undefined
-    await restore(ctx)
-  })
-
-  pi.on('session_compact', async (_event, ctx) => {
-    guided = false
-    noteBaseline = undefined
-    await restore(ctx)
-  })
-
-  pi.on('context', event => {
-    const note = restoreText
-    if (!note || !event.messages.some(message => message.role === 'compactionSummary')) {
-      return
+  pi.on('agent_before_settle', async (event, ctx) => {
+    if (!resetRequested) return
+    resetRequested = false
+    if (event.outcome !== 'completed' || !enabled(ctx)) return
+    try {
+      const signal = ctx.signal
+      const note = await noteForCompaction(ctx, ctx.sessionManager.buildSessionProjection(), {
+        tokens: ctx.getContextUsage()?.tokens ?? undefined, signal,
+      })
+      signal?.throwIfAborted()
+      startWindow()
+      return { entries: [...event.entries, {
+        type: 'compaction', firstKeptEntryId: null, summary: handoffSummary(note.body), usage: note.usage,
+        details: { handoff: ID },
+      }, {
+        type: 'custom_message', customType: ID, display: false, content: CONTINUE_PROMPT,
+      }], continue: true }
+    } catch (error) {
+      ctx.ui.notify(`${MARKER} Could not start a fresh context: ${errorText(error)}`, 'warning')
     }
-    // Keep Pi's own summary and the stored transcript unchanged.
-    return { messages: event.messages.map(message => message.role === 'compactionSummary'
-      ? { ...message, summary: `${message.summary}\n\n${MARKER} Continue from the summary together with your handoff note:\n<handoff-note>\n${note}\n</handoff-note>` }
-      : message) }
-  })
-
-  pi.on('before_agent_start', (_event, ctx) => {
-    if (guided || !okf || !ctx.sessionManager.getSessionFile() || !pi.getActiveTools().includes('handoff_write')) {
-      return
-    }
-    guided = true
-    const content = `${MARKER} Keep this session's handoff note (\`${noteName(currentConcept(ctx))}\`) current in the language of the conversation. Use handoff_write to replace it, handoff_append to add to it, and handoff_read to review it. The note is restored alongside Pi's regular summary after compaction. ${NOTE_UPKEEP}\n\n${NOTE_CONTENT}`
-
-    return { message: { customType: ID, content, display: false } }
   })
 
   pi.on('turn_end', (event, ctx) => {
-    if (event.outcome !== 'completed' || !okf || !ctx.sessionManager.getSessionFile() || !pi.getActiveTools().includes('handoff_write')) {
-      return
-    }
+    if (event.outcome !== 'completed' || !enabled(ctx) || resetRequested) return
     const tokens = ctx.getContextUsage()?.tokens
-    if (tokens == null) {
-      return
-    }
+    if (tokens == null) return
     noteBaseline = Math.min(noteBaseline ?? tokens, tokens)
-    if (tokens - noteBaseline < reminderInterval) {
-      return
-    }
-    noteBaseline = tokens
+    if (remindedAt !== undefined && tokens < remindedAt) remindedAt = undefined
 
-    return { entries: [...event.entries, {
-      type: 'custom_message', customType: ID, display: false,
-      content: `${MARKER} Bring the session's handoff note up to date with handoff_write at the next useful point.`,
+    let content: string | undefined
+    if (!urgentSent && pi.getActiveTools().includes('new_context')) {
+      const limits = contextLimits(ctx)
+      if (limits?.compactAt !== undefined && tokens >= limits.compactAt - limits.contextWindow * marginPercent / 100) {
+        urgentSent = true
+        const remaining = Math.max(0, limits.compactAt - tokens).toLocaleString('en-US')
+        content = `About ${remaining} tokens remain before automatic compaction. Update the note, call new_context, and end with a one-line status.`
+      }
+    }
+    if (!content && tokens - noteBaseline >= reminderInterval && (remindedAt === undefined || tokens - remindedAt >= reminderInterval)) {
+      remindedAt = tokens
+      content = 'Bring the session handoff note up to date with handoff_write at the next useful point.'
+    }
+    if (content) return { entries: [...event.entries, {
+      type: 'custom_message', customType: ID, display: false, content: `${MARKER} ${content}`,
     }] }
+  })
+
+  pi.registerTool({
+    name: 'context_remaining', label: 'Context remaining',
+    description: 'Report the current context usage and remaining tokens before Pi automatic compaction.',
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _update, ctx) {
+      const limits = contextLimits(ctx)
+      if (!limits || limits.tokens == null) return toolText('Context usage is not available yet.')
+      const { tokens, contextWindow, compactAt } = limits
+      const format = (value: number) => value.toLocaleString('en-US')
+      const used = `Context used: ${format(tokens)} of ${format(contextWindow)} tokens.`
+      return toolText(compactAt === undefined ? `${used} Automatic compaction is off.`
+        : `${used} Automatic compaction runs above ${format(compactAt)} tokens; about ${format(Math.max(0, compactAt - tokens))} tokens remain.`)
+    },
+  })
+
+  pi.registerTool({
+    name: 'new_context', label: 'Start fresh context',
+    description: 'Continue from the handoff note in a fresh context after the current run settles. Update the note first, then end with a one-line status.',
+    parameters: Type.Object({}),
+    async execute(_id, _params, _signal, _update, ctx) {
+      requireOkf()
+      currentConcept(ctx)
+      if (!enabled(ctx)) throw new Error('Enable handoff_write to start a fresh context.')
+      resetRequested = true
+      return toolText('A fresh context is scheduled. Once the note is current, end this run with a one-line status.')
+    },
   })
 
   pi.registerTool({
@@ -206,13 +291,10 @@ export default function (pi: ExtensionAPI) {
       async execute(_id, params, _signal, _update, ctx) {
         requireOkf()
         const concept = currentConcept(ctx)
-        const chars = await withFileMutationQueue(join(store.root, 'index.md'), () =>
-          writeNote(store, concept, { body: noteBody(params[field]), title: params.title?.trim() || undefined, append }),
-        )
+        const chars = await save(concept, { body: noteBody(params[field]), title: params.title?.trim() || undefined, append })
         noteBaseline = ctx.getContextUsage()?.tokens ?? noteBaseline
-        if (ctx.sessionManager.getBranch().some(entry => entry.type === 'compaction')) {
-          await restore(ctx)
-        }
+        remindedAt = undefined
+        urgentSent = false
 
         return toolText(savedText(concept, { isAppend: append, chars }))
       },
