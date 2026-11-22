@@ -73,7 +73,6 @@ function renderPiMessage(message: Record<string, unknown>, detail: Detail): stri
   return text === '' ? undefined : `${message.role}: ${text}`
 }
 
-/** One transcript JSONL line as a readable message, or `undefined` for none. */
 export function renderEntry(line: string, detail: Detail = 'brief'): string | undefined {
   let entry: unknown
   try {
@@ -128,10 +127,8 @@ export function renderEntry(line: string, detail: Detail = 'brief'): string | un
   return undefined
 }
 
-/** A context size a transcript reports, and the entry that reported it. */
 export type Usage = { id: string; tokens: number }
 
-/** The whole JSON objects among transcript lines, skipping any cut short. */
 export function parseItems(lines: Iterable<string>): Record<string, unknown>[] {
   const items: Record<string, unknown>[] = []
   for (const line of lines) {
@@ -184,11 +181,6 @@ export function latestUsage(items: readonly Record<string, unknown>[], isAgent =
   return undefined
 }
 
-/**
- * Renders transcript JSONL lines as readable messages, with each of `marks`
- * before its line, stopping at a whole entry once `maxChars` is reached so the
- * reader can continue from `nextLine`.
- */
 export function renderEntries(
   lines: readonly string[],
   firstLine: number,

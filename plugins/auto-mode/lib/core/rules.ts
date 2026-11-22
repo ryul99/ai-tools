@@ -37,7 +37,6 @@ export function parseRule(source: string): ToolRule | undefined {
   return { source, tool, pattern: pattern === undefined || pattern.trim() === '' ? undefined : globToRegExp(pattern.trim()) }
 }
 
-/** True for an allow rule broad enough to run arbitrary code, which auto mode sets aside. */
 export function isBroadAllowRule(source: string): boolean {
   const rule = parseRule(source)
   if (!rule || rule.tool !== 'bash') {

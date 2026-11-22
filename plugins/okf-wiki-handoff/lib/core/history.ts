@@ -24,10 +24,8 @@ const SEARCH_HEADER = 'History search'
 const READ_HEADER = 'History of session'
 const OWN_RESULTS = [LIST_HEADER, SEARCH_HEADER, READ_HEADER].map(header => `[tool_result] ${header}`)
 
-/** Where a project's transcripts are and which session is asking. */
 export type Locator = {
   root: string
-  /** The project's key in the notes bundle. */
   key: string
   sessionId: string
 } & (
@@ -41,7 +39,6 @@ type Session = {
   path: string
   mtimeMs: number
   agents: Agent[]
-  /** The project's key, which also names its folder of handoff notes. */
   key: string
   /** How the project is shown: Codex's working directory, or Claude Code's folder name. */
   project: string
@@ -65,9 +62,6 @@ function parsed(line: string | undefined): Record<string, unknown> | undefined {
   }
 }
 
-// ---------------------------------------------------------------------------
-// Finding the transcripts
-
 /** The project's transcript folder, or, when the project root was named differently, the one that holds this session. */
 async function claudeFolder(host: Host, locator: Locator): Promise<string | undefined> {
   const named = `${locator.root}/${locator.key}`
@@ -84,7 +78,6 @@ async function claudeFolder(host: Host, locator: Locator): Promise<string | unde
   return undefined
 }
 
-/** A Claude Code subagent's transcript in the asking session, or `undefined` before it exists. */
 export async function claudeAgentTranscript(host: Host, locator: Locator, agentId: string): Promise<string | undefined> {
   const folder = await claudeFolder(host, locator)
   const path = folder === undefined ? undefined : `${folder}/${locator.sessionId}/subagents/agent-${agentId}.jsonl`
@@ -161,7 +154,6 @@ async function rollouts(host: Host, folder: string, depth: number): Promise<{ pa
   return found
 }
 
-/** A Codex rollout's thread, its project, and the thread that spawned it, from its `session_meta` line. */
 function codexMeta(line: string | undefined): { id: string; cwd: string; parent?: string; label: string } | undefined {
   const item = parsed(line)
   const payload = item?.payload
@@ -211,7 +203,6 @@ async function codexSessions(host: Host, locator: Locator, scope: Scope): Promis
   return sessions
 }
 
-/** The sessions of the project, or of every project, newest first. */
 async function sessionsIn(host: Host, locator: Locator, scope: Scope): Promise<Session[]> {
   if (locator.kind === 'pi') {
     return (await locator.listSessions(scope))
@@ -236,7 +227,6 @@ async function findSession(host: Host, locator: Locator, id: string): Promise<Se
   return (await sessionsIn(host, locator, 'project')).find(isNamed) ?? (await sessionsIn(host, locator, 'all')).find(isNamed)
 }
 
-/** The lines that open each context window: the first line, then each compaction's. */
 async function windowStarts(host: Host, kind: Locator['kind'], path: string): Promise<number[]> {
   const needle = kind === 'claude' ? 'compact_boundary' : kind === 'pi' ? '"compaction"' : 'compacted'
   const hits = await host.grep(path, needle, BOUNDARIES_PER_FILE)
@@ -269,13 +259,9 @@ function unknownSession(session: string): string {
   return `No session \`${session}\` was found in any project. List this project's sessions with history_list and "session" as "${ALL_SESSIONS}", or every project's with all_projects.`
 }
 
-/** The session a tool names, or every session when it names none and asks for every project. */
 function namedSession(locator: Locator, options: { session?: string; allProjects?: boolean }): string {
   return options.session ?? (options.allProjects === true ? ALL_SESSIONS : locator.sessionId)
 }
-
-// ---------------------------------------------------------------------------
-// Tools
 
 function firstPrompt(lines: readonly string[]): string | undefined {
   for (const line of lines) {
@@ -288,10 +274,8 @@ function firstPrompt(lines: readonly string[]): string | undefined {
   return undefined
 }
 
-/** The note title of a session, found by its id in the notes folder of its project's key. */
 export type TitleOf = (sessionId: string, key: string) => Promise<string>
 
-/** What `history_list` answers: one session's context windows and subagents, or every session of the project or of every project. */
 export async function historyListText(
   host: Host,
   locator: Locator,
@@ -353,10 +337,6 @@ Pass "session" as "${ALL_SESSIONS}" to list every session of this project.`
 ${parts.join('\n')}`
 }
 
-/**
- * What `history_search` answers: messages of one session, or of every session of the project or of
- * every project newest first, that contain `query`, ignoring case.
- */
 export async function historySearchText(
   host: Host,
   locator: Locator,
@@ -421,7 +401,6 @@ export async function historySearchText(
 ${results.join('\n')}${more}`
 }
 
-/** What `history_read` answers: one page of a session's or subagent's messages, and where the next page starts. */
 export async function historyReadText(
   host: Host,
   locator: Locator,
@@ -472,9 +451,6 @@ ${rendered.text || '(no messages in these lines)'}
 ${footer}`
 }
 
-// ---------------------------------------------------------------------------
-// Tool definitions, shared by the plugin's MCP server and the mod
-
 const SESSION_PROPERTY = {
   type: 'string',
   description: "A session id of any project, from history_list or history_search; defaults to this session.",
@@ -485,7 +461,6 @@ const ALL_PROJECTS_PROPERTY = {
   description: `With session "${ALL_SESSIONS}" or no session, cover the sessions of every project instead of this one; slower.`,
 }
 
-/** The history tools by name: what each does and the input it takes, without the plugin's own properties. */
 export const HISTORY_TOOLS = {
   history_list: {
     description:
@@ -555,7 +530,6 @@ function countInput(input: Record<string, unknown>, key: string): number | undef
   return typeof value === 'number' && Number.isInteger(value) && value > 0 ? value : undefined
 }
 
-/** Runs a history tool on its raw input. */
 export function runHistoryTool(
   name: HistoryToolName,
   host: Host,

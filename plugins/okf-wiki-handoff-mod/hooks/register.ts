@@ -72,7 +72,6 @@ const DEFAULT_NOTE_SEARCH_LIMIT = 20
 const USAGE_TAIL_BYTES = 1_000_000
 const USAGE_WIDE_TAIL_BYTES = 16_000_000
 
-/** The handoff bundle and this project's folder of handoff concepts in it. */
 type Place = { store: Store; folder: string }
 
 type SessionRecord = {
@@ -88,7 +87,6 @@ type SessionRecord = {
   window?: number
 }
 
-/** What the mod remembers about one subagent of the session, which keeps a note of its own. */
 type AgentRecord = {
   /** The subagent's context size when its note last changed, or when it was first seen. */
   noteTokens?: number
@@ -431,7 +429,6 @@ async function guidanceFor($: EngineInterface): Promise<string | undefined> {
   return runtime.guidance.text
 }
 
-/** The reminder due now, if any: an urgent one near compaction, else a periodic one. */
 async function dueReminder($: EngineInterface): Promise<string | undefined> {
   const { context } = await $.session.usage()
   const tokens = context.tokens
@@ -606,7 +603,6 @@ async function noticeAgentNote(
   }
 }
 
-/** Resets the context once the turn that asked for it has let go of the session. */
 async function resetContext($: EngineInterface): Promise<void> {
   for (let attempt = 0; attempt < RESET_ATTEMPTS; attempt += 1) {
     if ((await sessionRecord($)).isResetPending !== true) {
@@ -635,14 +631,12 @@ async function resetContext($: EngineInterface): Promise<void> {
   await saveRecord($, { ...(await sessionRecord($)), isResetPending: false })
 }
 
-/** The caller's own note: the session's for the main agent, a subagent's its own. */
 async function ownConcept($: EngineInterface, place: Place, agentId: string | undefined): Promise<string> {
   const sessionId = await $.session.id()
 
   return agentId === undefined ? noteConcept(place.folder, sessionId) : agentNote(place, sessionId, agentId)
 }
 
-/** The note a tool names by its `handoff` name, or the caller's own; a string when the input is unusable. */
 async function namedConcept(
   $: EngineInterface,
   place: Place,
@@ -668,7 +662,6 @@ async function readTool($: EngineInterface, input: Record<string, unknown>, agen
   return typeof named === 'string' ? named : noteText(place.store, named.concept)
 }
 
-/** Writes or appends to the caller's own note and counts it as the note's latest version. */
 async function saveTool(
   $: EngineInterface,
   input: Record<string, unknown>,

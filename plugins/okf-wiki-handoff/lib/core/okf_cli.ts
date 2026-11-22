@@ -1,6 +1,3 @@
-// Finds the okf CLI, installing it with uv when it is missing, so the plugin works
-// in a fresh cloud sandbox as well as on a machine that already has it.
-//
 // Shared by okf-wiki-handoff and okf-wiki-handoff-mod (through its `hooks/core` link), so it
 // imports nothing: Node runs it in the plugin and the mod engine in the mod.
 
@@ -11,7 +8,6 @@ const INSTALL_TIMEOUT_MS = 240_000
 
 export type Run = (argv: readonly string[], timeoutMs: number) => Promise<{ exitCode: number; stdout: string; stderr: string }>
 
-/** Where okf runs from, and whether that folder is already on the PATH. */
 export type OkfCommand = { path: string; isOnPath: boolean }
 
 export type OkfSetup = (OkfCommand & { isInstalled: boolean }) | { error: string }
@@ -33,7 +29,6 @@ export async function locateOkf(run: Run): Promise<OkfCommand | undefined> {
   return path === undefined || path === '' ? undefined : { path, isOnPath: where === 'path' }
 }
 
-/** Finds okf, installing it from its repository with `uv tool install` when it is not there. */
 export async function ensureOkf(run: Run, onInstall?: () => void): Promise<OkfSetup> {
   const found = await locateOkf(run)
   if (found !== undefined) {
@@ -57,7 +52,6 @@ export async function ensureOkf(run: Run, onInstall?: () => void): Promise<OkfSe
     : { ...installed, isInstalled: true }
 }
 
-/** The folder that holds okf, to put on the PATH of the shells the agent starts. */
 export function okfFolder(path: string): string {
   return path.slice(0, path.lastIndexOf('/')) || '/'
 }

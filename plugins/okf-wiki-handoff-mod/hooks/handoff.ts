@@ -6,7 +6,6 @@ import { NOTE_CONTENT, NOTE_UPKEEP } from './core/notes.ts'
 export const PLUGIN = 'okf-wiki-handoff-mod'
 export const SECTION_ID = `${PLUGIN}:handoff`
 
-/** The tools the mod registers, by their short names. */
 export const TOOL = {
   read: 'handoff_read',
   write: 'handoff_write',
@@ -42,7 +41,6 @@ export const RESET_INSTRUCTIONS = `${MARKER} new_context`
 
 export const CONTINUE_PROMPT = `${MARKER} The context was reset to your handoff note at your request. Continue the task from the note.`
 
-/** The system prompt section that sets the note-keeping protocol for the session. */
 export function guidanceSection(options: { note: string }): string {
   return `# Context management
 

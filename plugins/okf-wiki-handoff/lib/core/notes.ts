@@ -23,10 +23,8 @@ export type Host = {
   grep: (path: string, needle: string, limit: number) => Promise<{ number: number; text: string }[]>
 }
 
-/** A handoff bundle and how the notes it creates describe themselves. */
 export type Store = { host: Host; root: string; generatedBy: string }
 
-/** What a note holds, as the guidance and a compaction's note-writing prompt ask for it. */
 export const NOTE_CONTENT =
   "The note has no fixed layout: write what you would need to pick the task up with nothing else, such as the goal and what finished looks like, the state of the work including what is uncommitted or waiting on the person, the person's rules in their own wording, the decisions made and the next steps. Record only what the conversation shows, keep names, numbers and error messages exact, and leave out what your instructions already say."
 
@@ -79,11 +77,6 @@ export async function noteTitle(store: Store, concept: string): Promise<string> 
   return typeof title === 'string' ? title : ''
 }
 
-/**
- * Writes the note, creating it first when it is missing. With `append`, the
- * body is added after what the note holds instead of replacing it. Resolves
- * the length of the note's body in characters.
- */
 export async function writeNote(
   store: Store,
   concept: string,
@@ -118,7 +111,7 @@ export async function writeNote(
   return text.length
 }
 
-/** What `handoff_write` and `handoff_append` answer. The size is there for the agent to judge when the note needs tidying. */
+/** The size is there for the agent to judge when the note needs tidying. */
 export function savedText(concept: string, options: { isAppend: boolean; chars: number }): string {
   return `${options.isAppend ? 'Appended to' : 'Saved'} ${noteName(concept)}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
 }
@@ -127,7 +120,6 @@ export function utcMinute(ms: number): string {
   return `${new Date(ms).toISOString().slice(0, 16).replace('T', ' ')} UTC`
 }
 
-/** What `handoff_read` answers for a note. */
 export async function noteText(store: Store, concept: string): Promise<string> {
   const note = await readNote(store, concept)
   if (note === undefined) {
@@ -139,7 +131,6 @@ export async function noteText(store: Store, concept: string): Promise<string> {
   return `${heading}\n\n${note.body.trim() || '(empty)'}`
 }
 
-/** What `handoff_search` answers: the matching notes of the project or of every project, most relevant first, each with its best matching lines. */
 export async function searchNotesText(
   store: Store,
   folder: string,

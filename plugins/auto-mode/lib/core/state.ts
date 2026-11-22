@@ -56,7 +56,6 @@ export interface BlockedAction {
   reason: string
 }
 
-/** Recently blocked actions, and the ones the user approved to run once when the agent retries. */
 export class BlockedActions {
   private items: BlockedAction[] = []
   private approved = new Set<string>()

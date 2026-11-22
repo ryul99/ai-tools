@@ -39,7 +39,6 @@ function indented(lines: readonly string[], indent: string): string {
   return lines.map(line => `${indent}${line}`).join('\n')
 }
 
-/** The JSON Schema a CLI's structured output is held to. */
 export const LESSON_SCHEMA = {
   type: 'object',
   additionalProperties: false,
@@ -118,7 +117,6 @@ function toCorrection(value: unknown): Correction | undefined {
   return { original, suggestion, category: known, explanation }
 }
 
-/** A lesson from a reply object, or `undefined` when it is not one. */
 export function toLesson(value: unknown): Lesson | undefined {
   if (!isRecord(value)) {
     return undefined
@@ -144,7 +142,6 @@ export function toLesson(value: unknown): Lesson | undefined {
   }
 }
 
-/** A lesson from a model's prose reply, read from its outermost braces. */
 export function parseLesson(reply: string): Lesson | undefined {
   const start = reply.indexOf('{')
   const end = reply.lastIndexOf('}')

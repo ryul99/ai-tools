@@ -1,27 +1,8 @@
 # Tips Korean
 
-`tips-korean` provides guidance for Korean users, the Korean language, and
-Korea-related contexts.
-
-## Installation
-
-### Codex
-
-```sh
-codex plugin add tips-korean@ryul99-ai-tools
-```
-
-### Claude Code
-
-```sh
-claude plugin install tips-korean@ryul99-ai-tools
-```
-
-### Pi
-
-Install the [Pi package](../../README.md#pi), then use `/skill:korean-writing`.
-
-## Included skills
+Guidance for Korean users, the Korean language, and Korea-related contexts.
+See the [installation guide](../../README.md#installation); in Pi, invoke a
+skill with `/skill:<name>`.
 
 - `korean-writing`: Guidelines for writing fluent, natural Korean responses while preserving the intended meaning.
 

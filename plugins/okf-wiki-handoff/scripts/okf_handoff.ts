@@ -1,10 +1,3 @@
-// Hooks and MCP server of okf-wiki-handoff.
-//
-// The hooks keep the agent writing a per-session OKF handoff note and bring that
-// note back after a context compaction. The MCP server gives the agent the tools
-// to read, write, append to and search the notes, and to list, search and read
-// the project's transcripts.
-
 import { appendFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
@@ -56,7 +49,6 @@ const USAGE_TAIL_BYTES = 1_000_000
 const USAGE_WIDE_TAIL_BYTES = 16_000_000
 const MAX_INJECTED_NOTE_CHARS = 20_000
 
-/** What the hooks remember about a session between events, in the plugin data directory. */
 type State = {
   note?: string
   guided?: boolean
@@ -72,9 +64,6 @@ type State = {
 
 type HookOutput = Record<string, unknown>
 
-// ---------------------------------------------------------------------------
-// Runtime
-
 function nowIso(): string {
   return `${new Date().toISOString().slice(0, 19)}Z`
 }
@@ -83,7 +72,6 @@ function expandHome(path: string): string {
   return path === '~' || path.startsWith('~/') ? `${homedir()}${path.slice(1)}` : path
 }
 
-/** The reminder interval from OKF_HANDOFF_REMIND_TOKENS, such as 25000 or 25k. */
 function remindTokens(): number {
   return Math.trunc(parsePositive(process.env.OKF_HANDOFF_REMIND_TOKENS, DEFAULT_REMIND_TOKENS)) || DEFAULT_REMIND_TOKENS
 }
@@ -108,7 +96,6 @@ function bundleRoot(host: 'claude' | 'codex'): string {
   return join(configDirectory(host), BUNDLE_NAME)
 }
 
-/** Where the CLI keeps its transcripts: Claude Code's `projects` folder or Codex's `sessions` folder. */
 function transcriptRoot(host: 'claude' | 'codex'): string {
   return join(configDirectory(host), host === 'codex' ? 'sessions' : 'projects')
 }
@@ -146,9 +133,6 @@ function storeAt(root: string): Store {
   return { host: nodeHost, root, generatedBy: GENERATED_BY }
 }
 
-// ---------------------------------------------------------------------------
-// Transcripts
-
 async function tailItems(path: string, limit: number): Promise<Record<string, unknown>[]> {
   let raw: Buffer
   try {
@@ -185,7 +169,6 @@ async function transcriptUsage(path: unknown, isAgent = false): Promise<Usage | 
   )
 }
 
-/** A subagent's transcript, which Claude Code keeps beside the session's, whose path its hooks are given. */
 function agentTranscriptPath(payload: Record<string, unknown>, sessionId: string, agentId: string): string {
   const transcript = typeof payload.transcript_path === 'string' ? expandHome(payload.transcript_path) : ''
 
@@ -208,10 +191,6 @@ async function compactionMarker(transcript: string): Promise<string | undefined>
   return undefined
 }
 
-// ---------------------------------------------------------------------------
-// Session state
-
-/** Whose state: a session's main agent, or one of its subagents. */
 type Owner = { sessionId: string; agentId?: string }
 
 function statePath(dataDir: string, owner: Owner): string {
@@ -238,7 +217,6 @@ async function saveState(dataDir: string, owner: Owner, state: State): Promise<v
   await rename(temporary, path)
 }
 
-/** The note file's modification time in seconds, as the state records it. */
 async function noteMtime(store: Store, concept: string): Promise<number | null> {
   const mtimeMs = await store.host.mtimeMs(notePath(store, concept))
 
@@ -256,7 +234,6 @@ async function observe(state: State, store: Store, usage: Usage | undefined, isA
   }
   const modified = await noteMtime(store, state.note ?? '')
   if (modified !== (state.note_mtime ?? null)) {
-    // The agent rewrote the note since the last hook looked at it.
     state.note_mtime = modified
     state.note_tokens = tokens ?? state.note_tokens ?? null
     state.reminded_tokens = null
@@ -272,9 +249,6 @@ async function observe(state: State, store: Store, usage: Usage | undefined, isA
 
   return tokens
 }
-
-// ---------------------------------------------------------------------------
-// Hook messages
 
 function guidance(concept: string): string {
   const name = noteName(concept)
@@ -325,7 +299,6 @@ function agentCompactedNotice(concept: string, modifiedMs: number): string {
   return `${MARKER} Your context was just compacted. You keep a handoff note, \`${name}\`, last updated ${utcMinute(modifiedMs)}. Read it with \`handoff_read\` and note="${name}" before you continue, when the summary leaves out something you need; load the \`${SERVER_NAME}\` tools with tool search first if they are not loaded.`
 }
 
-/** A nudge once `interval` tokens of work have passed since the note last changed, repeated after every further interval. */
 function reminder(concept: string, tokens: number, state: State, interval: number): string | undefined {
   const since = tokens - (state.note_tokens ?? 0)
   const reminded = state.reminded_tokens ?? null
@@ -336,9 +309,6 @@ function reminder(concept: string, tokens: number, state: State, interval: numbe
 
   return `${MARKER} About ${since.toLocaleString('en-US')} tokens of work have passed since the handoff note \`${noteName(concept)}\` was last updated. Bring it up to date at the next good point.`
 }
-
-// ---------------------------------------------------------------------------
-// Hooks
 
 function hookContext(event: string, text: string): HookOutput {
   return { hookSpecificOutput: { hookEventName: event, additionalContext: text } }
@@ -565,9 +535,6 @@ async function logError(dataDir: string, error: unknown): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// MCP server
-
 const NOTE_PROPERTY = {
   type: 'string',
   description: "Your handoff note's name, as your instructions give it.",
@@ -626,7 +593,6 @@ const TOOLS = [
   })),
 ]
 
-/** The note a tool names, and the project folder and session it belongs to, a subagent's note its session's. */
 function checkedNote(input: Record<string, unknown>): { concept: string; folder: string; key: string; sessionSlug: string } {
   const note = input.note
   const concept = typeof note === 'string' ? nameConcept(note) : undefined
@@ -767,9 +733,6 @@ async function runMcp(host: 'claude' | 'codex'): Promise<void> {
     }
   }
 }
-
-// ---------------------------------------------------------------------------
-// Entry point
 
 async function readStdin(): Promise<string> {
   const chunks: Buffer[] = []

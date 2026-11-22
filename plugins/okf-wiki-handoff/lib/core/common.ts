@@ -7,7 +7,6 @@ export const HANDOFF_DIR = 'handoff'
 export const HANDOFF_TAG = 'autosave-handoff'
 export const HANDOFF_TYPE = 'Handoff'
 export const SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}$/
-/** A note's slug in its project folder: a session's, or a subagent's under its session's. */
 export const NOTE_SLUG_PATTERN = /^[a-z0-9][a-z0-9-]{0,63}(?:\/agent-[a-z0-9][a-z0-9-]{0,127})?$/
 export const DEFAULT_REMIND_TOKENS = 25_000
 
@@ -16,39 +15,33 @@ export function projectKey(projectRoot: string): string {
   return projectRoot.replace(/[^A-Za-z0-9]/g, '-')
 }
 
-/** The bundle folder that holds a project's handoff notes. */
 export function handoffFolder(projectRoot: string): string {
   return `${HANDOFF_DIR}/${projectKey(projectRoot)}`
 }
 
-/** A session id as the slug of its note. */
 export function sessionSlug(sessionId: string): string {
   return sessionId.toLowerCase().replace(/[^a-z0-9-]/g, '-')
 }
 
-/** A note's name as agents see it, `<project-key>/<slug>`: its concept id without the bundle folder. */
 export function noteName(concept: string): string {
   return concept.startsWith(`${HANDOFF_DIR}/`) ? concept.slice(HANDOFF_DIR.length + 1) : concept
 }
 
-/** The concept id of a note named `<project-key>/<slug>`, or `undefined` for any other name. */
 export function nameConcept(name: string): string | undefined {
   const match = /^[A-Za-z0-9-]+\/(.+)$/.exec(name)
 
   return match?.[1] !== undefined && NOTE_SLUG_PATTERN.test(match[1]) ? `${HANDOFF_DIR}/${name}` : undefined
 }
 
-/** The note concept of a session in a project folder. */
 export function noteConcept(folder: string, sessionId: string): string {
   return `${folder}/${sessionSlug(sessionId)}`
 }
 
-/** The note concept of a subagent, beside its session's note so the two read as one task. */
+/** Beside its session's note so the two read as one task. */
 export function agentConcept(sessionConcept: string, agentId: string): string {
   return `${sessionConcept}/agent-${sessionSlug(agentId)}`
 }
 
-/** A setting such as `25000`, `25k` or `2.5`, or `fallback` when it is not a positive number. */
 export function parsePositive(raw: string | undefined, fallback: number): number {
   const match = /^\s*([0-9]+(?:\.[0-9]+)?)\s*([kKmM]?)\s*$/.exec(raw ?? '')
   if (match === null) {

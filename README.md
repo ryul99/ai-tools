@@ -20,49 +20,37 @@ A small collection of plugins for Codex, Claude Code, and Pi.
 
 ## Installation
 
+Install only the plugins you need. `okf-wiki` and `okf-wiki-handoff` require
+the `okf` CLI:
+
+```sh
+uv tool install git+https://github.com/ryul99/okf-wiki.git
+```
+
+The Codex and Claude Code handoff plugins install it automatically when
+missing; Pi does not. The hook plugins (`english-lecturer`,
+`okf-wiki-handoff`) require Node.js 22.18 or newer.
+
 ### Codex
 
 ```sh
 codex plugin marketplace add ryul99/ai-tools
-codex plugin add okf-wiki@ryul99-ai-tools
-codex plugin add okf-wiki-handoff@ryul99-ai-tools
-codex plugin add english-lecturer@ryul99-ai-tools
-codex plugin add tips-korean@ryul99-ai-tools
-codex plugin add tips-engineering@ryul99-ai-tools
+codex plugin add <plugin>@ryul99-ai-tools
 ```
 
-Install only the plugins you need. `okf-wiki-handoff` also requires `okf-wiki`.
-For `english-lecturer` and `okf-wiki-handoff`, open `/hooks` in Codex and
-trust the plugin hook definition before use. Both require Node.js 22.18 or newer.
+`okf-wiki-handoff` also requires `okf-wiki`. For hook plugins, open `/hooks`
+and trust the plugin hook definition before use.
 
 ### Claude Code
 
 ```sh
 claude plugin marketplace add ryul99/ai-tools
-claude plugin install okf-wiki@ryul99-ai-tools
-claude plugin install okf-wiki-handoff@ryul99-ai-tools
-claude plugin install english-lecturer@ryul99-ai-tools
-claude plugin install tips-korean@ryul99-ai-tools
-claude plugin install tips-engineering@ryul99-ai-tools
+claude plugin install <plugin>@ryul99-ai-tools
 ```
 
-Install only the plugins you need. `okf-wiki-handoff` also installs `okf-wiki`.
-The `english-lecturer` and `okf-wiki-handoff` hook plugins require Node.js
-22.18 or newer.
-
-The `english-lecturer` mod is an optional replacement for its hook plugin:
-
-```sh
-claude plugin install english-lecturer-mod@ryul99-ai-tools
-```
-
-Choose one handoff plugin: `okf-wiki-handoff` restores notes alongside the
-CLI's compaction summary; the experimental `okf-wiki-handoff-mod` uses notes
-in place of that summary and lets the agent continue in fresh contexts.
-
-```sh
-claude plugin install okf-wiki-handoff-mod@ryul99-ai-tools
-```
+`english-lecturer-mod` is an optional replacement for `english-lecturer`.
+Choose one of `okf-wiki-handoff` and `okf-wiki-handoff-mod`; both install
+`okf-wiki`.
 
 ### Pi
 
@@ -72,47 +60,16 @@ With Pi 1.6.0 or newer, install the repository as one package:
 pi install git:github.com/ryul99/ai-tools
 ```
 
-From a checkout, use `pi install .` instead, or try it for one invocation
-with `pi -e .`. Run `pi config` to enable only the extensions and skills you
-want. All extensions are enabled by default.
-
-- For `okf-wiki` or `okf-wiki-handoff`, install `okf` 0.2.0 or newer using
-  the command below. The Pi extension does not install external software.
-  Pi Handoff uses the note in place of the default compaction summary and
-  can resume work from the note in a fresh context within the same session.
-- `english-lecturer` shows feedback above the editor in interactive Pi (or
-  sends widget updates to RPC clients). It makes a separate model request
-  with the prompt text and does not change the prompt sent to the coding
-  agent. It uses the active Pi model by default; set
-  `ENGLISH_LECTURER_PI_MODEL=provider/model-id` to override it.
-- `auto-mode` reviews tool calls with a separate model request before they
-  run. It is on when a session starts and uses the session model by default;
-  see its [README](plugins/auto-mode/README.md) to configure it or turn it off.
+From a checkout, use `pi install .`, or `pi -e .` for one invocation. All
+extensions and skills are enabled by default; run `pi config` to choose.
 
 ## Usage
 
-The `okf-wiki` plugin requires the `okf` CLI:
+For wiki tasks, run inside a wiki, name the wiki root in your request, or set
+`OKF_ROOT=/path/to/wiki`.
 
-```sh
-uv tool install git+https://github.com/ryul99/okf-wiki.git
-```
-
-The Codex and Claude Code handoff plugins install it automatically when
-missing; this requires `uv` and network access. For wiki tasks, run inside a
-wiki, provide the wiki root in your request, or set it for your shell:
-
-```sh
-export OKF_ROOT=/path/to/wiki
-```
-
-The `english-lecturer` plugin runs automatically for Codex and Claude Code
-prompts after installation. Codex also requires the `/hooks` trust approval
-described above. Set `ENGLISH_LECTURER_CLAUDE_MODEL` to override Claude's
-default `haiku` model, or `ENGLISH_LECTURER_CODEX_MODEL` to override the current
-Codex default model used for its feedback.
-
-## Testing Pi support
-
-With Node.js 22.19 or newer and `okf` 0.2.0 or newer on `PATH`, run
-`npm install` and `npm test`. The tests use the Pi SDK and temporary session
-and OKF directories; no API credentials are required.
+`english-lecturer` runs on every prompt and does not change the prompt sent
+to the agent. To override the model it uses, set
+`ENGLISH_LECTURER_CLAUDE_MODEL` (default `haiku`),
+`ENGLISH_LECTURER_CODEX_MODEL`, or `ENGLISH_LECTURER_PI_MODEL=provider/model-id`
+(default: the active Pi model).

@@ -1,5 +1,3 @@
-// UserPromptSubmit hook of english-lecturer: asks a child `claude -p` or `codex exec`
-// for a lesson on the prompt and shows it as a system message.
 // acknowledge: https://github.com/crescent-stdio for prompt
 
 import { spawn } from 'node:child_process'
@@ -45,7 +43,6 @@ function hookOutput(message: string): void {
   process.stdout.write(`${JSON.stringify(payload)}\n`)
 }
 
-/** The child's failure as the shell captured it: its stderr without the trailing newlines. */
 function detail(ran: Ran | Error): string {
   const text = ran instanceof Error ? ran.message : ran.stderr
 

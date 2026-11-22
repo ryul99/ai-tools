@@ -64,7 +64,6 @@ export function parseConfig(text: string | undefined): AutoModeConfig {
   return { model, rules, policy, warnings }
 }
 
-/** Loads the config file, reusing the parsed result until the file changes. */
 export class ConfigLoader {
   private cached: { stamp: string, config: AutoModeConfig } | undefined
 

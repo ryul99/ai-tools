@@ -35,9 +35,7 @@ The review has two stages:
 
 - **Screen.** A one-word answer that leans toward blocking. Most safe actions
   pass here.
-- **Review.** Runs only for flagged actions and reasons through the policy. It
-  repeats the screen request and extends it, so providers with prompt caching
-  serve most of it from cache.
+- **Review.** Runs only for flagged actions and reasons through the policy.
 
 When the reviewer blocks a call, the agent receives the reason and is told to
 find a safer approach or ask you. After 3 blocks in a row or 20 in a session,
@@ -102,10 +100,8 @@ Pi reloads the file when it changes.
 ## Commands
 
 - `/auto-mode on` or `/auto-mode off`: turn review on or off for this session.
-- `/auto-mode status`: show the following:
-  - the reviewer model and the block counters
-  - review counts
-  - reviewer token usage, including cache reads
+- `/auto-mode status`: show the reviewer model, block counters, review
+  counts, and reviewer token usage.
 - `/auto-mode blocked`: pick a recently blocked action to approve once. Then
   ask the agent to retry it.
 

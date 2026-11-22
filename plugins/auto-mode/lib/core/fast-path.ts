@@ -42,7 +42,6 @@ function isReadOnlyCommand(words: string[]): boolean {
   return READ_ONLY_COMMANDS.has(name) || name === 'sort'
 }
 
-/** True when every part of the command only reads, so it can run without review. */
 export function isReadOnlyShell(command: string): boolean {
   const parsed = parseCommand(command)
   if (parsed.opaque || parsed.segments.length === 0) {
@@ -88,7 +87,6 @@ export function writeLocation(cwd: string, path: string): 'inside' | 'protected'
   return PROTECTED_FILES.some(pattern => pattern.test(parts[parts.length - 1])) ? 'protected' : 'inside'
 }
 
-/** Whether a tool call can run without the classifier. */
 export function isFastPath(cwd: string, toolName: string, input: Record<string, unknown>): boolean {
   if (READ_ONLY_TOOLS.has(toolName)) {
     return true
