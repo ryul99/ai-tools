@@ -1,0 +1,30 @@
+{
+  "name": "ryul99-ai-tools",
+  "version": "0.1.0",
+  "type": "module",
+  "keywords": ["pi-package"],
+  "repository": "github:ryul99/ai-tools",
+  "scripts": {
+    "test": "node --test tests/pi.test.mjs"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "1.6.0",
+    "@earendil-works/pi-coding-agent": "1.6.0"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*",
+    "typebox": "*"
+  },
+  "pi": {
+    "extensions": [
+      "plugins/english-lecturer/pi/index.ts",
+      "plugins/okf-wiki-handoff/pi/index.ts"
+    ],
+    "skills": [
+      "plugins/council/pi-skills",
+      "plugins/okf-wiki/skills",
+      "plugins/tips-engineering/skills",
+      "plugins/tips-korean/skills"
+    ]
+  }
+}

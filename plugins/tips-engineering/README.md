@@ -16,6 +16,11 @@ codex plugin add tips-engineering@ryul99-ai-tools
 claude plugin install tips-engineering@ryul99-ai-tools
 ```
 
+### Pi
+
+Install the [Pi package](../../README.md#pi), then use `/skill:github-searching`
+or `/skill:ui-principles`.
+
 ## Included skills
 
 - `github-searching`: Tips for effectively searching GitHub issues and pull requests.

@@ -5,9 +5,7 @@
 // to read, write, append to and search the notes, and to list, search and read
 // the project's transcripts.
 
-import { spawn } from 'node:child_process'
-import { createReadStream } from 'node:fs'
-import { appendFile, mkdir, open, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
+import { appendFile, mkdir, open, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { createInterface } from 'node:readline'
@@ -43,9 +41,10 @@ import {
   utcMinute,
   writeNote,
 } from '../lib/core/notes.ts'
-import type { DirEntry, Host, Store } from '../lib/core/notes.ts'
+import type { Store } from '../lib/core/notes.ts'
 import { ensureOkf, locateOkf, pathExport } from '../lib/core/okf_cli.ts'
 import type { OkfCommand, OkfSetup } from '../lib/core/okf_cli.ts'
+import { createNodeHost, lineCount, runCommand } from '../lib/node-host.ts'
 
 const VERSION = '0.5.0'
 const SERVER_NAME = 'okf-handoff'
@@ -53,7 +52,6 @@ const GENERATED_BY = 'process:okf-wiki-handoff'
 const SESSION_NOTE_PATTERN = /^handoff\/[A-Za-z0-9-]+\/[a-z0-9][a-z0-9-]{0,63}$/
 const SESSION_PATTERN = /^[A-Za-z0-9_-]{1,128}$/
 
-const OKF_TIMEOUT_MS = 30_000
 const USAGE_TAIL_BYTES = 1_000_000
 const USAGE_WIDE_TAIL_BYTES = 16_000_000
 const MAX_INJECTED_NOTE_CHARS = 20_000
@@ -115,65 +113,9 @@ function transcriptRoot(host: 'claude' | 'codex'): string {
   return join(configDirectory(host), host === 'codex' ? 'sessions' : 'projects')
 }
 
-function run(
-  argv: readonly string[],
-  options: { cwd?: string; stdin?: string; timeoutMs?: number },
-): Promise<{ exitCode: number; stdout: string; stderr: string }> {
-  return new Promise((resolve, reject) => {
-    const [command, ...args] = argv
-    if (command === undefined) {
-      reject(new Error('no command to run'))
-
-      return
-    }
-    const child = spawn(command, args, { cwd: options.cwd, timeout: options.timeoutMs ?? OKF_TIMEOUT_MS, stdio: 'pipe' })
-    const stdout: Buffer[] = []
-    const stderr: Buffer[] = []
-    child.stdout.on('data', (chunk: Buffer) => stdout.push(chunk))
-    child.stderr.on('data', (chunk: Buffer) => stderr.push(chunk))
-    child.on('error', reject)
-    child.on('close', (code, signal) => {
-      resolve({
-        exitCode: code ?? (signal === null ? 1 : 128),
-        stdout: Buffer.concat(stdout).toString('utf8'),
-        stderr: Buffer.concat(stderr).toString('utf8'),
-      })
-    })
-    child.stdin.end(options.stdin ?? '')
-  })
-}
-
-async function isDirectory(path: string): Promise<boolean> {
-  return (await stat(path).catch(() => undefined))?.isDirectory() === true
-}
-
 async function isFile(path: string): Promise<boolean> {
   return (await stat(path).catch(() => undefined))?.isFile() === true
 }
-
-async function* fileLines(path: string): AsyncGenerator<string> {
-  const lines = createInterface({ input: createReadStream(path, { encoding: 'utf8' }), crlfDelay: Number.POSITIVE_INFINITY })
-  try {
-    yield* lines
-  } finally {
-    lines.close()
-  }
-}
-
-async function lineCount(path: string): Promise<number> {
-  let count = 0
-  for await (const chunk of createReadStream(path)) {
-    for (const byte of chunk as Buffer) {
-      if (byte === 0x0a) {
-        count += 1
-      }
-    }
-  }
-
-  return count
-}
-
-const runCommand = (argv: readonly string[], timeoutMs: number) => run(argv, { timeoutMs })
 
 let okfCommand: OkfCommand | undefined
 
@@ -193,81 +135,12 @@ async function exposeOkf(found: OkfCommand): Promise<void> {
   }
 }
 
-const nodeHost: Host = {
-  async okf(args, stdin) {
-    // A miss is not kept: the MCP server starts while the session start may still be installing okf.
-    okfCommand ??= await locateOkf(runCommand)
-    const executable = okfCommand?.path
-    if (executable === undefined) {
-      throw new Error('okf command is not available')
-    }
-    const rootIndex = args.indexOf('--root')
-    const root = rootIndex === -1 ? undefined : args[rootIndex + 1]
-    const ran = await run([executable, '--format', 'json', ...args], {
-      cwd: root !== undefined && (await isDirectory(root)) ? root : undefined,
-      stdin,
-    })
-    if (ran.exitCode !== 0) {
-      const detail = ran.stderr.trim() || ran.stdout.trim() || `exit ${ran.exitCode}`
-      const command = args.slice(rootIndex === -1 ? 0 : 2, (rootIndex === -1 ? 0 : 2) + 2).join(' ')
-      throw new Error(`okf ${command} failed: ${detail}`)
-    }
-    if (ran.stdout.trim() === '') {
-      return undefined
-    }
-    try {
-      return JSON.parse(ran.stdout)
-    } catch {
-      throw new Error('okf returned invalid JSON')
-    }
-  },
-  exists: async path => (await stat(path).catch(() => undefined)) !== undefined,
-  mtimeMs: async path => (await stat(path).catch(() => undefined))?.mtimeMs,
-  async list(path) {
-    const entries = await readdir(path, { withFileTypes: true }).catch(() => [])
-    const listed: DirEntry[] = []
-    for (const entry of entries) {
-      const kind = entry.isFile() ? 'file' : entry.isDirectory() ? 'dir' : 'other'
-      const mtimeMs = kind === 'file' ? ((await stat(join(path, entry.name)).catch(() => undefined))?.mtimeMs ?? 0) : 0
-      listed.push({ name: entry.name, kind, mtimeMs })
-    }
+const nodeHost = createNodeHost(async () => {
+  // The MCP server may start before the session start hook has installed okf.
+  okfCommand ??= await locateOkf(runCommand)
 
-    return listed
-  },
-  readText: path => readFile(path, 'utf8').catch(() => undefined),
-  lineCount,
-  async grep(path, needle, limit) {
-    const lowered = needle.toLowerCase()
-    const hits: { number: number; text: string }[] = []
-    let number = 0
-    for await (const line of fileLines(path)) {
-      number += 1
-      if (line.toLowerCase().includes(lowered)) {
-        hits.push({ number, text: line })
-        if (hits.length >= limit) {
-          break
-        }
-      }
-    }
-
-    return hits
-  },
-  async readLines(path, from, to) {
-    const lines: string[] = []
-    let number = 0
-    for await (const line of fileLines(path)) {
-      number += 1
-      if (number > to) {
-        break
-      }
-      if (number >= from) {
-        lines.push(line)
-      }
-    }
-
-    return lines
-  },
-}
+  return okfCommand
+})
 
 function storeAt(root: string): Store {
   return { host: nodeHost, root, generatedBy: GENERATED_BY }

@@ -26,13 +26,14 @@ const OWN_RESULTS = [LIST_HEADER, SEARCH_HEADER, READ_HEADER].map(header => `[to
 
 /** Where a project's transcripts are and which session is asking. */
 export type Locator = {
-  kind: 'claude' | 'codex'
-  /** Claude Code's `projects` directory, or Codex's `sessions` directory. */
   root: string
-  /** The project's key, as `projectKey` makes it from the project root. */
+  /** The project's key in the notes bundle. */
   key: string
   sessionId: string
-}
+} & (
+  { kind: 'claude' | 'codex' } |
+  { kind: 'pi'; listSessions: (scope: Scope) => Promise<Omit<Session, 'agents'>[]> }
+)
 
 type Agent = { id: string; path: string; label: string }
 type Session = {
@@ -212,6 +213,11 @@ async function codexSessions(host: Host, locator: Locator, scope: Scope): Promis
 
 /** The sessions of the project, or of every project, newest first. */
 async function sessionsIn(host: Host, locator: Locator, scope: Scope): Promise<Session[]> {
+  if (locator.kind === 'pi') {
+    return (await locator.listSessions(scope))
+      .sort((left, right) => right.mtimeMs - left.mtimeMs)
+      .map(session => ({ ...session, agents: [] }))
+  }
   if (!(await host.exists(locator.root))) {
     return []
   }
@@ -232,10 +238,13 @@ async function findSession(host: Host, locator: Locator, id: string): Promise<Se
 
 /** The lines that open each context window: the first line, then each compaction's. */
 async function windowStarts(host: Host, kind: Locator['kind'], path: string): Promise<number[]> {
-  const hits = await host.grep(path, kind === 'claude' ? 'compact_boundary' : 'compacted', BOUNDARIES_PER_FILE)
+  const needle = kind === 'claude' ? 'compact_boundary' : kind === 'pi' ? '"compaction"' : 'compacted'
+  const hits = await host.grep(path, needle, BOUNDARIES_PER_FILE)
   const items = hits.map(hit => ({ number: hit.number, item: parsed(hit.text) }))
   let boundaries: number[]
-  if (kind === 'claude') {
+  if (kind === 'pi') {
+    boundaries = items.filter(({ item }) => item?.type === 'compaction').map(({ number }) => number)
+  } else if (kind === 'claude') {
     boundaries = items
       .filter(({ item }) => item?.type === 'system' && item.subtype === 'compact_boundary')
       .map(({ number }) => number)

@@ -1,6 +1,6 @@
 ---
 name: okf-wiki
-description: Manage file-based Open Knowledge Format (OKF) wiki bundles with the okf CLI. Use when Codex or Claude needs to initialize an OKF bundle; create, inspect, search, or edit concepts; manage frontmatter, tags, sources, verification, trust, or lifecycle metadata; audit validation, links, citations, or stale content; or safely move a concept while preserving internal references.
+description: Manage file-based Open Knowledge Format (OKF) wiki bundles with the okf CLI. Use when you need to initialize an OKF bundle; create, inspect, search, or edit concepts; manage frontmatter, tags, sources, verification, trust, or lifecycle metadata; audit validation, links, citations, or stale content; or safely move a concept while preserving internal references.
 ---
 
 # OKF Wiki

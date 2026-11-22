@@ -17,6 +17,10 @@ codex plugin add tips-korean@ryul99-ai-tools
 claude plugin install tips-korean@ryul99-ai-tools
 ```
 
+### Pi
+
+Install the [Pi package](../../README.md#pi), then use `/skill:korean-writing`.
+
 ## Included skills
 
 - `korean-writing`: Guidelines for writing fluent, natural Korean responses while preserving the intended meaning.

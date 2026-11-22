@@ -50,7 +50,30 @@ function renderClaudeBlock(block: unknown, detail: Detail): string {
   return ''
 }
 
-/** One transcript JSONL line as a readable message, from Claude Code or Codex, or `undefined` for none. */
+function renderPiMessage(message: Record<string, unknown>, detail: Detail): string | undefined {
+  if (message.role === 'toolResult') {
+    const label = message.isError === true ? 'tool_result error' : 'tool_result'
+
+    return `tool: [${label}] ${cut(textOf(message.content), TOOL_RESULT_CHARS, detail)}`
+  }
+  if (message.role !== 'user' && message.role !== 'assistant') {
+    return undefined
+  }
+  const blocks = Array.isArray(message.content) ? message.content : [message.content]
+  const text = blocks.map(block => {
+    if (message.role === 'assistant' && isRecord(block) && block.type === 'toolCall') {
+      const name = typeof block.name === 'string' ? block.name : 'tool'
+
+      return `[tool_use ${name}] ${cut(JSON.stringify(block.arguments ?? {}), TOOL_INPUT_CHARS, detail)}`
+    }
+
+    return typeof block === 'string' || (isRecord(block) && block.type === 'text') ? textOf([block]) : ''
+  }).filter(Boolean).join('\n')
+
+  return text === '' ? undefined : `${message.role}: ${text}`
+}
+
+/** One transcript JSONL line as a readable message, or `undefined` for none. */
 export function renderEntry(line: string, detail: Detail = 'brief'): string | undefined {
   let entry: unknown
   try {
@@ -60,6 +83,9 @@ export function renderEntry(line: string, detail: Detail = 'brief'): string | un
   }
   if (!isRecord(entry)) {
     return undefined
+  }
+  if (entry.type === 'message' && isRecord(entry.message)) {
+    return renderPiMessage(entry.message, detail)
   }
   if ((entry.type === 'user' || entry.type === 'assistant') && isRecord(entry.message)) {
     const content = entry.message.content
