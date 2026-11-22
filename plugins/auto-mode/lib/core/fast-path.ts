@@ -9,6 +9,8 @@ const FILE_WRITE_TOOLS = new Set(['write', 'edit'])
 
 const PROTECTED_DIRS = new Set(['.git', '.pi', '.claude', '.codex', '.agents', '.vscode', '.idea', '.husky', '.devcontainer', '.github'])
 const PROTECTED_FILES = [/^\.env(\..*)?$/, /^\.npmrc$/, /^\.pypirc$/, /^\.netrc$/, /^\.mcp\.json$/, /^\.gitmodules$/, /^\.gitattributes$/, /^\.envrc$/, /^\.tool-versions$/, /^\.mise\.toml$/]
+// Default macOS and Windows file systems ignore case, so `.GIT/hooks` is `.git/hooks` there.
+const normalizeName = (name: string) => name.toLowerCase()
 
 const READ_ONLY_COMMANDS = new Set([
   'basename', 'cat', 'cut', 'date', 'df', 'diff', 'dirname', 'du', 'echo', 'false', 'file', 'grep', 'head', 'id',
@@ -18,28 +20,59 @@ const READ_ONLY_COMMANDS = new Set([
 const READ_ONLY_GIT = new Set(['blame', 'cat-file', 'describe', 'diff', 'grep', 'log', 'ls-files', 'ls-tree', 'rev-parse', 'shortlog', 'show', 'status'])
 const FIND_WRITING_FLAGS = /^-(exec|execdir|ok|okdir|delete|fprint|fprint0|fprintf|fls)$/
 
-function isReadOnlyCommand(words: string[]): boolean {
-  const [name, ...args] = words
-  if (name === 'git') {
-    const sub = args[0]
-    if (sub === undefined || !READ_ONLY_GIT.has(sub)) {
+// getopt and git accept unique prefixes of long options, so `--comp=sh` means `--compress-program=sh`.
+function hasLongOption(args: string[], names: string[]): boolean {
+  return args.some(arg => {
+    if (!arg.startsWith('--') || arg === '--') {
       return false
     }
-    return !args.some(arg => arg.startsWith('--output') || arg === '--ext-diff' || arg.startsWith('--textconv'))
+    const given = arg.slice(2).split('=')[0]
+    return names.some(name => name.startsWith(given))
+  })
+}
+
+// Short options can be bundled and take attached values (`-uoFILE`), so any cluster containing the
+// letter counts. A value that happens to contain it only sends the command to review.
+function hasShortOption(args: string[], letters: string): boolean {
+  return args.some(arg => /^-[^-]/.test(arg) && [...letters].some(letter => arg.includes(letter)))
+}
+
+function operands(args: string[]): string[] {
+  return args.filter(arg => !arg.startsWith('-'))
+}
+
+function isReadOnlyCommand(words: string[]): boolean {
+  const [name, ...args] = words
+  switch (name) {
+    case 'git': {
+      const [sub, ...rest] = args
+      if (sub === undefined || !READ_ONLY_GIT.has(sub)) {
+        return false
+      }
+      if (sub === 'grep' && (hasShortOption(rest, 'O') || hasLongOption(rest, ['open-files-in-pager']))) {
+        return false
+      }
+      return !hasLongOption(rest, ['output', 'ext-diff', 'textconv', 'filters'])
+    }
+    case 'find':
+      return !args.some(arg => FIND_WRITING_FLAGS.test(arg))
+    case 'sort':
+      return !hasShortOption(args, 'o') && !hasLongOption(args, ['output', 'compress-program'])
+    case 'rg':
+      return !hasLongOption(args, ['pre', 'hostname-bin'])
+    case 'tree':
+      return !hasShortOption(args, 'oR') && !hasLongOption(args, ['output'])
+    case 'uniq':
+      return operands(args).length <= 1
+    case 'file':
+      return !hasShortOption(args, 'C') && !hasLongOption(args, ['compile'])
+    case 'date':
+      // `-I` takes an optional attached value such as `-Iseconds`, which isn't `-s`.
+      return !hasShortOption(args.filter(arg => !arg.startsWith('-I')), 's') && !hasLongOption(args, ['set'])
+        && operands(args).every(arg => arg.startsWith('+'))
+    default:
+      return READ_ONLY_COMMANDS.has(name)
   }
-  if (name === 'find') {
-    return !args.some(arg => FIND_WRITING_FLAGS.test(arg))
-  }
-  if (name === 'sort') {
-    return !args.some(arg => arg === '-o' || arg.startsWith('--output'))
-  }
-  if (name === 'rg') {
-    return !args.some(arg => arg === '--pre' || arg.startsWith('--pre='))
-  }
-  if (name === 'tree') {
-    return !args.some(arg => arg === '-o')
-  }
-  return READ_ONLY_COMMANDS.has(name) || name === 'sort'
 }
 
 export function isReadOnlyShell(command: string): boolean {
@@ -80,8 +113,8 @@ export function writeLocation(cwd: string, path: string): 'inside' | 'protected'
   if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) {
     return 'outside'
   }
-  const parts = rel.split(sep)
-  if (parts.slice(0, -1).some(part => PROTECTED_DIRS.has(part)) || PROTECTED_DIRS.has(parts[parts.length - 1])) {
+  const parts = rel.split(sep).map(normalizeName)
+  if (parts.some(part => PROTECTED_DIRS.has(part))) {
     return 'protected'
   }
   return PROTECTED_FILES.some(pattern => pattern.test(parts[parts.length - 1])) ? 'protected' : 'inside'
