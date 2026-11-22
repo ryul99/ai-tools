@@ -21,7 +21,6 @@
       "plugins/okf-wiki-handoff/pi/index.ts"
     ],
     "skills": [
-      "plugins/council/pi-skills",
       "plugins/okf-wiki/skills",
       "plugins/tips-engineering/skills",
       "plugins/tips-korean/skills"

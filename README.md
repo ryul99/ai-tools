@@ -9,7 +9,6 @@ A small collection of plugins for Codex, Claude Code, and Pi.
 
 | Plugin | Codex | Claude Code | Pi | Description |
 | --- | --- | --- | --- | --- |
-| `council` | Yes | Yes | Yes | Uses multiple model perspectives to evaluate and synthesize answers. |
 | `okf-wiki` | Yes | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
 | [`okf-wiki-handoff`](plugins/okf-wiki-handoff/README.md) | Yes | Yes | Yes | Keeps session notes to help the agent continue after context compaction. |
 | `english-lecturer` | Yes | Yes | Yes | Corrects English prompts and provides brief language feedback. |
@@ -24,7 +23,6 @@ A small collection of plugins for Codex, Claude Code, and Pi.
 
 ```sh
 codex plugin marketplace add ryul99/ai-tools
-codex plugin add council@ryul99-ai-tools
 codex plugin add okf-wiki@ryul99-ai-tools
 codex plugin add okf-wiki-handoff@ryul99-ai-tools
 codex plugin add english-lecturer@ryul99-ai-tools
@@ -40,7 +38,6 @@ trust the plugin hook definition before use. Both require Node.js 22.18 or newer
 
 ```sh
 claude plugin marketplace add ryul99/ai-tools
-claude plugin install council@ryul99-ai-tools
 claude plugin install okf-wiki@ryul99-ai-tools
 claude plugin install okf-wiki-handoff@ryul99-ai-tools
 claude plugin install english-lecturer@ryul99-ai-tools
@@ -78,8 +75,6 @@ From a checkout, use `pi install .` instead, or try it for one invocation
 with `pi -e .`. Run `pi config` to enable only the extensions and skills you
 want. Both extensions are enabled by default.
 
-- For `council`, also run `pi install npm:pi-subagents`. Use
-  `/skill:council-baseline <question>` or `/skill:council-dynamic <question>`.
 - For `okf-wiki` or `okf-wiki-handoff`, install `okf` 0.2.0 or newer using
   the command below. The Pi extension does not install external software.
 - `english-lecturer` shows feedback above the editor in interactive Pi (or
@@ -89,15 +84,6 @@ want. Both extensions are enabled by default.
   `ENGLISH_LECTURER_PI_MODEL=provider/model-id` to override it.
 
 ## Usage
-
-Ask your agent to use an installed skill, for example:
-
-```text
-Use the council to evaluate this proposal.
-Find related concepts in my OKF wiki.
-Write this explanation in clear Korean.
-Investigate related GitHub issues and pull requests.
-```
 
 The `okf-wiki` plugin requires the `okf` CLI:
 
