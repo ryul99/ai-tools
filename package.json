@@ -4,9 +4,6 @@
   "type": "module",
   "keywords": ["pi-package"],
   "repository": "github:ryul99/ai-tools",
-  "scripts": {
-    "test": "node --test tests/pi.test.mjs"
-  },
   "devDependencies": {
     "@earendil-works/pi-ai": "1.6.0",
     "@earendil-works/pi-coding-agent": "1.6.0"
