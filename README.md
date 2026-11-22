@@ -9,6 +9,7 @@ A small collection of plugins for Codex, Claude Code, and Pi.
 
 | Plugin | Codex | Claude Code | Pi | Description |
 | --- | --- | --- | --- | --- |
+| [`auto-mode`](plugins/auto-mode/README.md) | No | No | Yes | Reviews Pi tool calls with a second model and blocks risky actions. |
 | `okf-wiki` | Yes | Yes | Yes | Manages Open Knowledge Format wikis safely with the `okf` CLI. |
 | [`okf-wiki-handoff`](plugins/okf-wiki-handoff/README.md) | Yes | Yes | Yes | Keeps session notes to help the agent continue after context compaction. |
 | `english-lecturer` | Yes | Yes | Yes | Corrects English prompts and provides brief language feedback. |
@@ -73,7 +74,7 @@ pi install git:github.com/ryul99/ai-tools
 
 From a checkout, use `pi install .` instead, or try it for one invocation
 with `pi -e .`. Run `pi config` to enable only the extensions and skills you
-want. Both extensions are enabled by default.
+want. All extensions are enabled by default.
 
 - For `okf-wiki` or `okf-wiki-handoff`, install `okf` 0.2.0 or newer using
   the command below. The Pi extension does not install external software.
@@ -84,6 +85,9 @@ want. Both extensions are enabled by default.
   with the prompt text and does not change the prompt sent to the coding
   agent. It uses the active Pi model by default; set
   `ENGLISH_LECTURER_PI_MODEL=provider/model-id` to override it.
+- `auto-mode` reviews tool calls with a separate model request before they
+  run. It is on when a session starts and uses the session model by default;
+  see its [README](plugins/auto-mode/README.md) to configure it or turn it off.
 
 ## Usage
 
