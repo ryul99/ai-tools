@@ -40,7 +40,11 @@ The review has two stages:
 When the reviewer blocks a call, the agent receives the reason and is told to
 find a safer approach or ask you. After 3 blocks in a row or 20 in a session,
 auto mode pauses and asks you about each action that needs review. Approving
-one resumes auto mode.
+one resumes auto mode. Blocks of calls made by one `codemode` script count as
+one block.
+
+Reviews and approval prompts run one at a time, including for calls that a
+`codemode` script issues in parallel.
 
 When the reviewer fails or times out, Pi asks you. Without an interactive UI,
 such as with `pi -p`, the call is blocked instead and the agent continues.

@@ -1,21 +1,31 @@
 export const CONSECUTIVE_LIMIT = 3
 export const TOTAL_LIMIT = 20
 const BLOCKED_HISTORY = 20
+const GROUP_HISTORY = 50
 
 /**
  * Counts classifier blocks. Too many in a row or in total means the classifier and the agent
  * disagree about the task, so review pauses and the user decides until they approve an action.
+ * Blocks within one group, such as the calls of one codemode script, count once: a script written
+ * before its first block shouldn't pause review on its own.
  */
 export class DenialTracker {
   consecutive = 0
   total = 0
   paused: 'consecutive' | 'total' | undefined
+  private counted: string[] = []
 
   allowed(): void {
     this.consecutive = 0
   }
 
-  blocked(): void {
+  blocked(group?: string): void {
+    if (group !== undefined) {
+      if (this.counted.includes(group)) {
+        return
+      }
+      this.counted = [group, ...this.counted].slice(0, GROUP_HISTORY)
+    }
     this.consecutive++
     this.total++
     if (this.total >= TOTAL_LIMIT) {

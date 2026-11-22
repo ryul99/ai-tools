@@ -57,6 +57,15 @@ export default function (pi: ExtensionAPI) {
   let contextFiles: ContextFile[] = []
   let stats = newStats()
   let shownWarnings = ''
+  let queue: Promise<unknown> = Promise.resolve()
+
+  // Codemode scripts issue calls concurrently. One review or dialog at a time keeps dialogs from
+  // stacking and lets each decision see the pause state left by the previous one.
+  function serialized<T>(task: () => Promise<T>): Promise<T> {
+    const run = queue.then(task)
+    queue = run.catch(() => undefined)
+    return run
+  }
 
   function updateStatus(ctx: ExtensionContext) {
     ctx.ui.setStatus(ID, enabled ? (tracker.paused ? 'auto mode (paused: asking you)' : 'auto mode') : undefined)
@@ -154,12 +163,39 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason: `Blocked by the auto mode deny rule "${ruled.rule}". ${RETRY_GUIDANCE}` }
     }
     if (ruled.decision === 'ask') {
-      return await askUser(ctx, toolName, input, `This action matches the ask rule "${ruled.rule}".`)
-        ? undefined
-        : { block: true, reason: `The user did not approve this action (ask rule "${ruled.rule}"). ${RETRY_GUIDANCE}` }
+      return serialized(async () => {
+        if (!enabled) {
+          return undefined
+        }
+        if (ctx.signal?.aborted) {
+          return { block: true, reason: 'The turn was cancelled before this action was approved.' }
+        }
+        return await askUser(ctx, toolName, input, `This action matches the ask rule "${ruled.rule}".`)
+          ? undefined
+          : { block: true, reason: `The user did not approve this action (ask rule "${ruled.rule}"). ${RETRY_GUIDANCE}` }
+      })
     }
     if (ruled.decision === 'allow' || blocked.consumeApproval(key) || isFastPath(ctx.cwd, toolName, input)) {
       return undefined
+    }
+    const group = event.parentToolCallId?.split('/')[0]
+    return serialized(() => decide(ctx, config, toolCallId, toolName, input, key, group))
+  })
+
+  async function decide(
+    ctx: ExtensionContext,
+    config: AutoModeConfig,
+    toolCallId: string,
+    toolName: string,
+    input: Record<string, unknown>,
+    key: string,
+    group: string | undefined,
+  ): Promise<{ block: true, reason: string } | undefined> {
+    if (!enabled) {
+      return undefined
+    }
+    if (ctx.signal?.aborted) {
+      return { block: true, reason: 'The turn was cancelled before this action was reviewed.' }
     }
 
     if (tracker.paused && ctx.hasUI) {
@@ -195,7 +231,7 @@ export default function (pi: ExtensionAPI) {
     const label = verdict.rule ? ` [${verdict.rule}]` : ''
     blocked.add({ key, toolName, input, rule: verdict.rule, reason: verdict.reason })
     if (ctx.hasUI) {
-      tracker.blocked()
+      tracker.blocked(group)
     }
     if (tracker.paused && ctx.hasUI) {
       updateStatus(ctx)
@@ -208,7 +244,7 @@ export default function (pi: ExtensionAPI) {
       ctx.ui.notify(`Auto mode blocked ${toolName}${label}: ${verdict.reason} (/auto-mode blocked to approve)`, 'warning')
     }
     return { block: true, reason: `Blocked by auto mode${label}: ${verdict.reason}\n${RETRY_GUIDANCE}` }
-  })
+  }
 
   pi.registerCommand(ID, {
     description: 'Auto mode: on, off, status, or blocked (approve a blocked action once)',
