@@ -92,10 +92,29 @@ export function projectTranscript(entries: EntryLike[], pendingCallId?: string):
   return lines.join('\n\n')
 }
 
-export function reviewRequest(transcript: string, toolName: string, input: unknown): string {
+const DESCRIPTION_LIMIT = 1_500
+
+export interface ToolDescription {
+  text: string
+  /** Where the tool comes from, such as `user extension` or `MCP`. */
+  source: string
+  trusted: boolean
+}
+
+function escapeAttribute(text: string): string {
+  return text.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;')
+}
+
+export function reviewRequest(transcript: string, toolName: string, input: unknown, tool?: ToolDescription): string {
+  // A description that closes its element could pose as the pending action or the transcript.
+  const description = tool === undefined || tool.text.trim() === '' ? '' : `
+
+<tool_description tool="${escapeAttribute(toolName)}" source="${escapeAttribute(tool.source)}" trust="${tool.trusted ? 'extension' : 'untrusted'}">
+${clip(tool.text.trim(), DESCRIPTION_LIMIT).replace(/<(\/?)(tool_description|pending_action|transcript)/gi, '[$1$2')}
+</tool_description>`
   return `<transcript>
 ${transcript === '' ? '(no earlier messages)' : transcript}
-</transcript>
+</transcript>${description}
 
 <pending_action>
 ${renderAction(toolName, input)}

@@ -8,11 +8,12 @@ import type { Complete, UsageLike, Verdict } from '../lib/core/classifier.ts'
 import { ConfigLoader } from '../lib/core/config.ts'
 import type { AutoModeConfig } from '../lib/core/config.ts'
 import { isFastPath } from '../lib/core/fast-path.ts'
-import { systemPrompt } from '../lib/core/policy.ts'
+import { denyRules, systemPrompt } from '../lib/core/policy.ts'
 import type { ContextFile } from '../lib/core/policy.ts'
 import { evaluateRules } from '../lib/core/rules.ts'
 import { actionKey, BlockedActions, DenialTracker } from '../lib/core/state.ts'
 import { projectTranscript, renderAction, reviewRequest } from '../lib/core/transcript.ts'
+import type { ToolDescription } from '../lib/core/transcript.ts'
 
 const ID = 'auto-mode'
 const REVIEW_TIMEOUT_MS = 90_000
@@ -25,6 +26,7 @@ interface Stats {
   screenAllowed: number
   reviewed: number
   blocked: number
+  unlabeled: number
   errors: number
   input: number
   cacheRead: number
@@ -32,7 +34,27 @@ interface Stats {
 }
 
 function newStats(): Stats {
-  return { reviews: 0, screenAllowed: 0, reviewed: 0, blocked: 0, errors: 0, input: 0, cacheRead: 0, cacheWrite: 0 }
+  return { reviews: 0, screenAllowed: 0, reviewed: 0, blocked: 0, unlabeled: 0, errors: 0, input: 0, cacheRead: 0, cacheWrite: 0 }
+}
+
+type ToolInfo = ReturnType<ExtensionAPI['getAllTools']>[number]
+
+/**
+ * The reviewer knows Pi's core tools, so only other tools get their description. Descriptions from
+ * the project or from an external server can be written by someone other than the user, so they are
+ * marked untrusted.
+ */
+function toolDescription(tool: ToolInfo | undefined): ToolDescription | undefined {
+  if (tool === undefined || typeof tool.description !== 'string') {
+    return undefined
+  }
+  const { source, scope, path } = tool.sourceInfo
+  if (source === 'builtin' && path === `builtin:${tool.name}`) {
+    return undefined
+  }
+  const external = path === 'builtin:mcp' || tool.namespace !== undefined
+  const label = external ? 'MCP' : source === 'builtin' ? 'built-in extension' : source === 'sdk' ? 'SDK' : `${scope} extension`
+  return { text: tool.description, source: label, trusted: !external && scope !== 'project' }
 }
 
 function reviewerModel(ctx: ExtensionContext, config: AutoModeConfig) {
@@ -114,8 +136,14 @@ export default function (pi: ExtensionAPI) {
       return reply as unknown as Awaited<ReturnType<Complete>>
     }
     const transcript = projectTranscript(ctx.sessionManager.getBranch() as never, toolCallId)
+    const tool = toolDescription(pi.getAllTools().find(item => item.name === toolName))
     try {
-      return await classify(complete, systemPrompt(config.policy, contextFiles), reviewRequest(transcript, toolName, input))
+      return await classify(
+        complete,
+        systemPrompt(config.policy, contextFiles),
+        reviewRequest(transcript, toolName, input, tool),
+        denyRules(config.policy),
+      )
     } catch (error) {
       return { decision: 'error', stage: 1, reason: error instanceof Error ? error.message : String(error), usage: [] }
     }
@@ -132,6 +160,8 @@ export default function (pi: ExtensionAPI) {
     }
     if (verdict.decision === 'block') {
       stats.blocked++
+    } else if (verdict.decision === 'ask') {
+      stats.unlabeled++
     }
     for (const usage of verdict.usage as UsageLike[]) {
       stats.input += usage.input
@@ -228,6 +258,13 @@ export default function (pi: ExtensionAPI) {
       return { block: true, reason: `Auto mode could not review this action (${verdict.reason}) and it was not approved. ${RETRY_GUIDANCE}` }
     }
 
+    if (verdict.decision === 'ask') {
+      if (await askUser(ctx, toolName, input, `Auto mode's reviewer would block this without naming a rule it breaks: ${verdict.reason}`)) {
+        return undefined
+      }
+      return { block: true, reason: `Auto mode's reviewer objected to this action (${verdict.reason}) and it was not approved. ${RETRY_GUIDANCE}` }
+    }
+
     const label = verdict.rule ? ` [${verdict.rule}]` : ''
     blocked.add({ key, toolName, input, rule: verdict.rule, reason: verdict.reason })
     if (ctx.hasUI) {
@@ -286,7 +323,7 @@ export default function (pi: ExtensionAPI) {
         `Config: ${loader.path}`,
         `Rules: ${config.rules.deny.length} deny, ${config.rules.ask.length} ask, ${config.rules.allow.length} allow`,
         `Blocks: ${tracker.consecutive} in a row, ${tracker.total} total`,
-        `Reviews: ${stats.reviews} (${stats.screenAllowed} passed the screen, ${stats.reviewed} reviewed in depth, ${stats.blocked} blocked, ${stats.errors} failed)`,
+        `Reviews: ${stats.reviews} (${stats.screenAllowed} passed the screen, ${stats.reviewed} reviewed in depth, ${stats.blocked} blocked, ${stats.unlabeled} sent to you without a rule, ${stats.errors} failed)`,
         `Reviewer tokens: ${stats.input} input, ${stats.cacheRead} cache read, ${stats.cacheWrite} cache write`,
       ].join('\n'), 'info')
     },

@@ -26,8 +26,11 @@ The first step that applies decides:
 5. Everything else goes to the reviewer.
 
 The reviewer sees your messages, the agent's earlier tool calls, the pending
-call, and the project's instruction files such as `AGENTS.md`. It does not see
-the agent's replies, its reasoning, or tool output. That keeps the agent from
+call, and the project's instruction files such as `AGENTS.md`. For tools other
+than Pi's core tools, it also sees the tool's description, so it knows what an
+extension tool such as `handoff_write` does. Descriptions from project
+extensions and MCP servers are marked untrusted. The reviewer does not see the
+agent's replies, its reasoning, or tool output. That keeps the agent from
 arguing its case and keeps content the agent read, such as a web page with
 hidden instructions, from steering the reviewer.
 
@@ -36,6 +39,9 @@ The review has two stages:
 - **Screen.** A one-word answer that leans toward blocking. Most safe actions
   pass here.
 - **Review.** Runs only for flagged actions and reasons through the policy.
+  A block must name the `hard_deny` or `soft_deny` rule the action breaks. If
+  it names none, the reviewer is asked once to reconsider. If it still names
+  none, Pi asks you, or blocks the call without an interactive UI.
 
 When the reviewer blocks a call, the agent receives the reason and is told to
 find a safer approach or ask you. After 3 blocks in a row or 20 in a session,
@@ -51,7 +57,9 @@ such as with `pi -p`, the call is blocked instead and the agent continues.
 
 ## Policy
 
-The policy has four lists of plain-English rules:
+The policy has four lists of plain-English rules. A rule's label is the text
+before its first colon, such as `Destructive Git`; a rule without a colon is
+its own label. The lists are:
 
 - `hard_deny`: blocked even if you ask for the action.
 - `soft_deny`: blocked unless an `allow` exception covers the action or you
