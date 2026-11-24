@@ -80,7 +80,7 @@ export async function noteTitle(store: Store, concept: string): Promise<string> 
 export async function writeNote(
   store: Store,
   concept: string,
-  options: { title?: string; body: string; append?: boolean },
+  options: { title?: string; body: string },
 ): Promise<number> {
   if (!(await store.host.exists(notePath(store, concept)))) {
     await ensureBundle(store)
@@ -103,17 +103,91 @@ export async function writeNote(
   if (current === undefined) {
     throw new Error(`${concept} disappeared while it was written`)
   }
-  const added = options.body.trim()
-  const kept = options.append === true ? current.body.trim() : ''
-  const text = [kept, added].filter(part => part !== '').join('\n\n')
+  const text = options.body.trim()
   await okf(store, ['body', 'set', concept, '--if-match', current.identity], text === '' ? '' : `${text}\n`)
 
   return text.length
 }
 
+export type NoteEdit = { oldText: string; newText: string }
+
+export const EDITS_PROPERTY = {
+  type: 'array',
+  minItems: 1,
+  description: 'Replacements matched against the note as it is now, not one after another.',
+  items: {
+    type: 'object',
+    properties: {
+      old_text: { type: 'string', description: 'Text that appears exactly once in the note and overlaps no other edit.' },
+      new_text: { type: 'string', description: 'The text to put in its place; empty to remove it.' },
+    },
+    required: ['old_text', 'new_text'],
+    additionalProperties: false,
+  },
+}
+
+export function parseEdits(value: unknown): NoteEdit[] {
+  if (!Array.isArray(value) || value.length === 0) {
+    throw new Error('Pass "edits" as a list of { old_text, new_text } replacements.')
+  }
+
+  return value.map((edit, index) => {
+    if (!isRecord(edit) || typeof edit.old_text !== 'string' || typeof edit.new_text !== 'string') {
+      throw new Error(`edits[${index}] needs "old_text" and "new_text" strings.`)
+    }
+
+    return { oldText: edit.old_text, newText: edit.new_text }
+  })
+}
+
+/** All or nothing, so a failed edit never leaves the note half changed. */
+export function applyEdits(body: string, edits: readonly NoteEdit[]): string {
+  const spans = edits
+    .map(({ oldText, newText }, index) => {
+      if (oldText === '') {
+        throw new Error(`edits[${index}].old_text must not be empty.`)
+      }
+      const start = body.indexOf(oldText)
+      if (start === -1) {
+        throw new Error(`edits[${index}].old_text does not appear exactly in the note; read the note again.`)
+      }
+      if (body.indexOf(oldText, start + 1) !== -1) {
+        throw new Error(`edits[${index}].old_text appears more than once in the note; include more of the surrounding text.`)
+      }
+
+      return { start, end: start + oldText.length, newText, index }
+    })
+    .sort((a, b) => a.start - b.start)
+  let text = ''
+  let at = 0
+  for (const span of spans) {
+    if (span.start < at) {
+      throw new Error(`edits[${span.index}] overlaps another edit; merge them into one.`)
+    }
+    text += body.slice(at, span.start) + span.newText
+    at = span.end
+  }
+
+  return text + body.slice(at)
+}
+
+export async function editNote(store: Store, concept: string, edits: readonly NoteEdit[]): Promise<number> {
+  const current = await readNote(store, concept)
+  if (current === undefined) {
+    throw new Error(`${noteName(concept)} has not been written yet; write the whole note first.`)
+  }
+  const text = applyEdits(current.body, edits).trim()
+  if (text === '') {
+    throw new Error('The edits would leave the note blank; write the whole note instead.')
+  }
+  await okf(store, ['body', 'set', concept, '--if-match', current.identity], `${text}\n`)
+
+  return text.length
+}
+
 /** The size is there for the agent to judge when the note needs tidying. */
-export function savedText(concept: string, options: { isAppend: boolean; chars: number }): string {
-  return `${options.isAppend ? 'Appended to' : 'Saved'} ${noteName(concept)}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
+export function savedText(concept: string, options: { isEdit: boolean; chars: number }): string {
+  return `${options.isEdit ? 'Edited' : 'Saved'} ${noteName(concept)}. The note is now ${options.chars.toLocaleString('en-US')} characters.`
 }
 
 export function utcMinute(ms: number): string {

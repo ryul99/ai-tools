@@ -9,7 +9,7 @@ export const SECTION_ID = `${PLUGIN}:handoff`
 export const TOOL = {
   read: 'handoff_read',
   write: 'handoff_write',
-  append: 'handoff_append',
+  edit: 'handoff_edit',
   search: 'handoff_search',
   remaining: 'context_remaining',
   newContext: 'new_context',
@@ -55,7 +55,7 @@ This session keeps a handoff note, \`${options.note}\`. When the context is rese
 export function agentGuidance(options: { note: string; sessionNote: string; agentId: string }): string {
   return `${MARKER} Your work as a subagent has run long, so you now keep a handoff note of your own, \`${options.note}\`. When your context fills up, compaction leaves only a summary and you are told the note is there to read.
 
-Keep it current with \`${toolId(TOOL.append)}\` and \`${toolId(TOOL.write)}\`, which write your own note. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it. \`${toolId(TOOL.read)}\` with handoff "${options.sessionNote}" reads the main agent's note, and \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" your own original messages.`
+Keep it current with \`${toolId(TOOL.write)}\` and \`${toolId(TOOL.edit)}\`, which change your own note. ${NOTE_UPKEEP} ${NOTE_CONTENT} Here the person is the agent that started you, and your final answer still goes to it. \`${toolId(TOOL.read)}\` with handoff "${options.sessionNote}" reads the main agent's note, and \`${toolId(TOOL.historyRead)}\` with agent "${options.agentId}" your own original messages.`
 }
 
 /**

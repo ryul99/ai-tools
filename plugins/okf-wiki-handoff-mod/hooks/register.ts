@@ -24,11 +24,14 @@ import { HISTORY_TOOLS, claudeAgentTranscript, runHistoryTool } from './core/his
 import type { HistoryToolName, Locator } from './core/history.ts'
 import { latestUsage, parseItems } from './core/transcript.ts'
 import {
+  EDITS_PROPERTY,
   MAX_SEARCH_RESULTS,
+  editNote,
   ensureBundle,
   notePath,
   noteText,
   noteTitle,
+  parseEdits,
   readNote,
   savedText,
   searchNotesText,
@@ -117,13 +120,10 @@ const WRITE_SCHEMA = {
   required: ['body'],
 }
 
-const APPEND_SCHEMA = {
+const EDIT_SCHEMA = {
   type: 'object',
-  properties: {
-    text: { type: 'string', description: 'The Markdown to add.' },
-    title: TITLE_PROPERTY,
-  },
-  required: ['text'],
+  properties: { edits: EDITS_PROPERTY },
+  required: ['edits'],
 }
 
 const SEARCH_SCHEMA = {
@@ -159,14 +159,14 @@ const TOOLS = [
   {
     name: TOOL.write,
     description:
-      "Replace the whole of this session's handoff note, creating it when it does not exist. It is the only way to change or remove what the note already says.",
+      "Replace the whole of this session's handoff note, creating it when it does not exist. It is the only way to set the note's title.",
     inputSchema: WRITE_SCHEMA,
   },
   {
-    name: TOOL.append,
+    name: TOOL.edit,
     description:
-      "Add text to the end of this session's handoff note, creating it when it does not exist.",
-    inputSchema: APPEND_SCHEMA,
+      "Replace exact text in this session's existing handoff note to change, add to, or remove part of it. Each old_text must appear exactly once in the note.",
+    inputSchema: EDIT_SCHEMA,
   },
   {
     name: TOOL.search,
@@ -665,20 +665,26 @@ async function readTool($: EngineInterface, input: Record<string, unknown>, agen
 async function saveTool(
   $: EngineInterface,
   input: Record<string, unknown>,
-  options: { field: 'body' | 'text'; isAppend: boolean; agentId: string | undefined },
+  options: { isEdit: boolean; agentId: string | undefined },
 ): Promise<string> {
-  const body = typeof input[options.field] === 'string' ? (input[options.field] as string).trim() : ''
-  if (body === '') {
-    return options.isAppend ? 'Pass "text" as the Markdown to add.' : 'Pass "body" as the whole note in Markdown.'
+  const { isEdit, agentId } = options
+  const edits = isEdit ? parseEdits(input.edits) : undefined
+  const body = typeof input.body === 'string' ? input.body.trim() : ''
+  if (!isEdit && body === '') {
+    return 'Pass "body" as the whole note in Markdown.'
   }
-  const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
-  const place = await handoffPlace($, true)
+  const place = await handoffPlace($, !isEdit)
   if (place === undefined) {
+    if (isEdit) {
+      return 'The handoff note has not been written yet; write the whole note first.'
+    }
     throw new Error('the handoff bundle could not be created')
   }
-  const { agentId } = options
   const concept = await ownConcept($, place, agentId)
-  const chars = await writeNote(place.store, concept, { title, body, append: options.isAppend })
+  const title = typeof input.title === 'string' && input.title.trim() !== '' ? input.title.trim() : undefined
+  const chars = edits === undefined
+    ? await writeNote(place.store, concept, { title, body })
+    : await editNote(place.store, concept, edits)
   if (agentId === undefined) {
     const record = await sessionRecord($)
     const { context } = await $.session.usage()
@@ -699,7 +705,7 @@ async function saveTool(
     })
   }
 
-  return savedText(concept, { isAppend: options.isAppend, chars })
+  return savedText(concept, { isEdit, chars })
 }
 
 async function searchTool($: EngineInterface, input: Record<string, unknown>): Promise<string> {
@@ -747,9 +753,9 @@ async function historyTool($: EngineInterface, name: HistoryToolName, input: Rec
 function saveResult(
   $: EngineInterface,
   e: object,
-  options: { field: 'body' | 'text'; isAppend: boolean; agentId: string | undefined },
+  options: { isEdit: boolean; agentId: string | undefined },
 ): Promise<string> {
-  const tool = options.isAppend ? TOOL.append : TOOL.write
+  const tool = options.isEdit ? TOOL.edit : TOOL.write
 
   return saveTool($, e as Record<string, unknown>, options).catch((error: unknown) => `${tool} failed: ${errorText(error)}`)
 }
@@ -828,10 +834,10 @@ export const register: Register = on => {
     ),
   }))
   on('tool.call', { tool: toolId(TOOL.write) }, async ($, e) => ({
-    result: await saveResult($, e, { field: 'body', isAppend: false, agentId: e.agentId }),
+    result: await saveResult($, e, { isEdit: false, agentId: e.agentId }),
   }))
-  on('tool.call', { tool: toolId(TOOL.append) }, async ($, e) => ({
-    result: await saveResult($, e, { field: 'text', isAppend: true, agentId: e.agentId }),
+  on('tool.call', { tool: toolId(TOOL.edit) }, async ($, e) => ({
+    result: await saveResult($, e, { isEdit: true, agentId: e.agentId }),
   }))
   on('tool.call', { tool: toolId(TOOL.search) }, async ($, e) => ({
     result: await searchTool($, e as unknown as Record<string, unknown>).catch(

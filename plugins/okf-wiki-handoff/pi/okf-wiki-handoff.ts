@@ -8,7 +8,7 @@ import { Type } from 'typebox'
 import { BUNDLE_NAME, DEFAULT_REMIND_TOKENS, errorText, HANDOFF_DIR, MARKER, nameConcept, noteConcept, noteName, parsePositive, projectKey, SLUG_PATTERN } from '../lib/core/common.ts'
 import { HISTORY_TOOLS, runHistoryTool } from '../lib/core/history.ts'
 import type { HistoryToolName, Locator } from '../lib/core/history.ts'
-import { MAX_SEARCH_RESULTS, NOTE_CONTENT, NOTE_UPKEEP, noteText, noteTitle, readNote, savedText, searchNotesText, writeNote } from '../lib/core/notes.ts'
+import { EDITS_PROPERTY, editNote, MAX_SEARCH_RESULTS, NOTE_CONTENT, NOTE_UPKEEP, noteText, noteTitle, parseEdits, readNote, savedText, searchNotesText, writeNote } from '../lib/core/notes.ts'
 import type { Store } from '../lib/core/notes.ts'
 import { locateOkf } from '../lib/core/okf_cli.ts'
 import type { OkfCommand } from '../lib/core/okf_cli.ts'
@@ -115,8 +115,18 @@ export default function (pi: ExtensionAPI) {
     urgentSent = false
   }
 
+  function mutate<T>(change: () => Promise<T>) {
+    return withFileMutationQueue(join(store.root, 'index.md'), change)
+  }
+
   function save(concept: string, options: Parameters<typeof writeNote>[2]) {
-    return withFileMutationQueue(join(store.root, 'index.md'), () => writeNote(store, concept, options))
+    return mutate(() => writeNote(store, concept, options))
+  }
+
+  function noteUpdated(ctx: ExtensionContext) {
+    noteBaseline = ctx.getContextUsage()?.tokens ?? noteBaseline
+    remindedAt = undefined
+    urgentSent = false
   }
 
   async function noteForCompaction(
@@ -164,7 +174,7 @@ export default function (pi: ExtensionAPI) {
     if (!enabled(ctx)) return
     const tools = pi.getActiveTools()
     const guidance = [
-      `Keep this session's handoff note (\`${noteName(currentConcept(ctx))}\`) current in the language of the conversation. Use handoff_write to replace it, handoff_append to add to it, and handoff_read to review it. Compaction uses the note in place of Pi's default summary when possible. The original messages stay in the transcript. ${NOTE_UPKEEP}`,
+      `Keep this session's handoff note (\`${noteName(currentConcept(ctx))}\`) current in the language of the conversation. Use handoff_write to replace it, handoff_edit to change parts of it, and handoff_read to review it. Compaction uses the note in place of Pi's default summary when possible. The original messages stay in the transcript. ${NOTE_UPKEEP}`,
       NOTE_CONTENT,
     ]
     if (tools.includes('context_remaining')) guidance.push('Use context_remaining to plan long steps against the remaining context budget.')
@@ -281,25 +291,34 @@ export default function (pi: ExtensionAPI) {
     },
   })
 
-  for (const append of [false, true]) {
-    const name = append ? 'handoff_append' : 'handoff_write'
-    const field = append ? 'text' : 'body'
-    pi.registerTool({
-      name, label: append ? 'Append to handoff note' : 'Write handoff note',
-      description: append ? 'Append Markdown to the current Pi session note.' : 'Replace the current Pi session note with up-to-date Markdown.',
-      parameters: Type.Object({ [field]: Type.String(), title: Type.Optional(Type.String()) }),
-      async execute(_id, params, _signal, _update, ctx) {
-        requireOkf()
-        const concept = currentConcept(ctx)
-        const chars = await save(concept, { body: noteBody(params[field]), title: params.title?.trim() || undefined, append })
-        noteBaseline = ctx.getContextUsage()?.tokens ?? noteBaseline
-        remindedAt = undefined
-        urgentSent = false
+  pi.registerTool({
+    name: 'handoff_write', label: 'Write handoff note',
+    description: 'Replace the current Pi session note with up-to-date Markdown.',
+    parameters: Type.Object({ body: Type.String(), title: Type.Optional(Type.String()) }),
+    async execute(_id, params, _signal, _update, ctx) {
+      requireOkf()
+      const concept = currentConcept(ctx)
+      const chars = await save(concept, { body: noteBody(params.body), title: params.title?.trim() || undefined })
+      noteUpdated(ctx)
 
-        return toolText(savedText(concept, { isAppend: append, chars }))
-      },
-    })
-  }
+      return toolText(savedText(concept, { isEdit: false, chars }))
+    },
+  })
+
+  pi.registerTool({
+    name: 'handoff_edit', label: 'Edit handoff note',
+    description: 'Replace exact text in the current Pi session note. Each old_text must appear exactly once in the note.',
+    parameters: Type.Object({ edits: Type.Unsafe<{ old_text: string; new_text: string }[]>(EDITS_PROPERTY) }),
+    async execute(_id, params, _signal, _update, ctx) {
+      requireOkf()
+      const concept = currentConcept(ctx)
+      const edits = parseEdits(params.edits)
+      const chars = await mutate(() => editNote(store, concept, edits))
+      noteUpdated(ctx)
+
+      return toolText(savedText(concept, { isEdit: true, chars }))
+    },
+  })
 
   pi.registerTool({
     name: 'handoff_search', label: 'Search handoff notes',

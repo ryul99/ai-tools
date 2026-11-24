@@ -22,12 +22,15 @@ import type { Locator } from '../lib/core/history.ts'
 import { latestUsage, parseItems } from '../lib/core/transcript.ts'
 import type { Usage } from '../lib/core/transcript.ts'
 import {
+  EDITS_PROPERTY,
+  editNote,
   MAX_SEARCH_RESULTS,
   NOTE_CONTENT,
   NOTE_UPKEEP,
   notePath,
   noteText,
   noteTitle,
+  parseEdits,
   readNote,
   savedText,
   searchNotesText,
@@ -561,14 +564,14 @@ const TOOLS = [
   {
     name: 'handoff_write',
     description:
-      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. It is the only way to change or remove what the note already says.",
+      "Replace the whole content of your okf-wiki-handoff note, creating it when it does not exist. It is the only way to set the note's title.",
     inputSchema: withNote({ body: { type: 'string', description: 'The whole note in Markdown.' }, title: TITLE_PROPERTY }, ['body']),
   },
   {
-    name: 'handoff_append',
+    name: 'handoff_edit',
     description:
-      "Add text to the end of your okf-wiki-handoff note, creating it when it does not exist.",
-    inputSchema: withNote({ text: { type: 'string', description: 'The Markdown to add.' }, title: TITLE_PROPERTY }, ['text']),
+      "Replace exact text in your existing okf-wiki-handoff note to change, add to, or remove part of it. Each old_text must appear exactly once in the note.",
+    inputSchema: withNote({ edits: EDITS_PROPERTY }, ['edits']),
   },
   {
     name: 'handoff_search',
@@ -628,17 +631,13 @@ const TOOL_HANDLERS: Record<string, (server: Server, input: Record<string, unkno
       body: requiredText(input, 'body', 'the whole note in Markdown'),
     })
 
-    return savedText(concept, { isAppend: false, chars })
+    return savedText(concept, { isEdit: false, chars })
   },
-  async handoff_append({ store }, input) {
+  async handoff_edit({ store }, input) {
     const { concept } = checkedNote(input)
-    const chars = await writeNote(store, concept, {
-      title: optionalTitle(input),
-      body: requiredText(input, 'text', 'the Markdown to add'),
-      append: true,
-    })
+    const chars = await editNote(store, concept, parseEdits(input.edits))
 
-    return savedText(concept, { isAppend: true, chars })
+    return savedText(concept, { isEdit: true, chars })
   },
   handoff_search({ store }, input) {
     const { folder } = checkedNote(input)
