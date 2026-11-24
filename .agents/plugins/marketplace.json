@@ -5,18 +5,6 @@
   },
   "plugins": [
     {
-      "name": "council",
-      "source": {
-        "source": "local",
-        "path": "./plugins/council"
-      },
-      "policy": {
-        "installation": "AVAILABLE",
-        "authentication": "ON_INSTALL"
-      },
-      "category": "Productivity"
-    },
-    {
       "name": "okf-wiki",
       "source": {
         "source": "local",
