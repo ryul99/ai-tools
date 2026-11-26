@@ -79,6 +79,7 @@ mode, so a repository cannot loosen its own review.
 ```json
 {
   "model": "openrouter/~anthropic/claude-haiku-latest",
+  "effort": "low",
   "rules": {
     "deny": ["bash(terraform destroy *)"],
     "ask": ["bash(git push *)"],
@@ -95,6 +96,10 @@ Every key is optional.
 
 - **`model`**: the reviewer, as `provider/model-id`. If you omit it, the
   reviewer uses the session model. A small, fast model keeps reviews quick.
+- **`effort`**: the reviewer's reasoning effort, one of `off`, `minimal`,
+  `low`, `medium`, `high`, `xhigh`, or `max`. If you omit it, the reviewer
+  runs with the provider's default. Unsupported levels for the chosen model
+  are clamped by the provider.
 - **Policy lists**: each list replaces the built-in list of the same name.
   Write `"$defaults"` to keep the built-in entries at that position.
 - **`rules`**: written as `tool` or `tool(pattern)`, where `*` matches any
@@ -112,8 +117,8 @@ Pi reloads the file when it changes.
 ## Commands
 
 - `/auto-mode on` or `/auto-mode off`: turn review on or off for this session.
-- `/auto-mode status`: show the reviewer model, block counters, review
-  counts, and reviewer token usage.
+- `/auto-mode status`: show the reviewer model and reasoning effort, block
+  counters, review counts, and reviewer token usage.
 - `/auto-mode blocked`: pick a recently blocked action to approve once. Then
   ask the agent to retry it.
 

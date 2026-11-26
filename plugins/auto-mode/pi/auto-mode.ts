@@ -132,6 +132,7 @@ export default function (pi: ExtensionAPI) {
         maxTokens: request.maxTokens,
         cacheRetention: 'short',
         sessionId: `${ctx.sessionManager.getSessionId()}:${ID}`,
+        ...(config.effort ? { reasoning: config.effort } : {}),
       }).result()
       return reply as unknown as Awaited<ReturnType<Complete>>
     }
@@ -319,7 +320,7 @@ export default function (pi: ExtensionAPI) {
       const model = reviewerModel(ctx, config)
       ctx.ui.notify([
         `Auto mode: ${enabled ? (tracker.paused ? 'on, paused (asking you)' : 'on') : 'off'}`,
-        `Reviewer: ${model ? `${model.provider}/${model.id}` : 'unavailable'}${config.model ? '' : ' (session model)'}`,
+        `Reviewer: ${model ? `${model.provider}/${model.id}` : 'unavailable'}${config.model ? '' : ' (session model)'}${config.effort ? ` (effort: ${config.effort})` : ''}`,
         `Config: ${loader.path}`,
         `Rules: ${config.rules.deny.length} deny, ${config.rules.ask.length} ask, ${config.rules.allow.length} allow`,
         `Blocks: ${tracker.consecutive} in a row, ${tracker.total} total`,

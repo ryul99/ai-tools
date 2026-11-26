@@ -1,13 +1,18 @@
 import { readFileSync, statSync } from 'node:fs'
 
+import type { ThinkingLevel } from '@earendil-works/pi-ai'
 import { resolvePolicy } from './policy.ts'
 import type { PolicySlots } from './policy.ts'
 import { compileRules } from './rules.ts'
 import type { ToolRules } from './rules.ts'
 
+const EFFORT_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+
 export interface AutoModeConfig {
   /** `provider/model-id` of the reviewer; the session model when unset. */
   model?: string
+  /** Reasoning effort of the reviewer; the provider default when unset. */
+  effort?: ThinkingLevel
   rules: ToolRules
   policy: PolicySlots
   /** Problems found while loading, shown to the user. */
@@ -50,6 +55,13 @@ export function parseConfig(text: string | undefined): AutoModeConfig {
     warnings.push('"model" must be "provider/model-id" or null; ignored.')
   }
 
+  let effort: ThinkingLevel | undefined
+  if (typeof raw.effort === 'string' && EFFORT_LEVELS.includes(raw.effort as ThinkingLevel)) {
+    effort = raw.effort as ThinkingLevel
+  } else if (raw.effort !== undefined && raw.effort !== null) {
+    warnings.push(`"effort" must be one of ${EFFORT_LEVELS.join(', ')} or null; ignored.`)
+  }
+
   const rulesRaw = raw.rules !== null && typeof raw.rules === 'object' ? raw.rules as Record<string, unknown> : {}
   const { rules, ignored } = compileRules(Object.fromEntries(RULE_KEYS.map(key => [key, stringList(rulesRaw[key], `rules.${key}`, warnings)])))
   if (ignored.length > 0) {
@@ -61,7 +73,7 @@ export function parseConfig(text: string | undefined): AutoModeConfig {
     return value === undefined ? [] : [[key, value]]
   })))
 
-  return { model, rules, policy, warnings }
+  return { model, effort, rules, policy, warnings }
 }
 
 export class ConfigLoader {
