@@ -16,7 +16,8 @@
     "extensions": [
       "plugins/auto-mode/pi/auto-mode.ts",
       "plugins/english-lecturer/pi/english-lecturer.ts",
-      "plugins/okf-wiki-handoff/pi/okf-wiki-handoff.ts"
+      "plugins/okf-wiki-handoff/pi/okf-wiki-handoff.ts",
+      "plugins/you-should-know/pi/you-should-know.ts"
     ],
     "skills": [
       "plugins/okf-wiki/skills",

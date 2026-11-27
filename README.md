@@ -17,6 +17,7 @@ A small collection of plugins for Codex, Claude Code, and Pi.
 | [`okf-wiki-handoff-mod`](plugins/okf-wiki-handoff-mod/README.md) | No | Yes (mod) | No | Experimental alternative that continues work in fresh contexts using session notes. |
 | [`tips-korean`](plugins/tips-korean/README.md) | Yes | Yes | Yes | Provides guidance for Korean users, the Korean language, and Korea-related contexts. |
 | [`tips-engineering`](plugins/tips-engineering/README.md) | Yes | Yes | Yes | Provides guidance for software engineering workflows. |
+| [`you-should-know`](plugins/you-should-know/README.md) | No | No | Yes | Watches the session and surfaces a short note above the editor about something worth knowing. |
 
 ## Installation
 
