@@ -16,6 +16,7 @@ import { projectTranscript, renderAction, reviewRequest } from '../lib/core/tran
 import type { ToolDescription } from '../lib/core/transcript.ts'
 
 const ID = 'auto-mode'
+const MODEL_ENV = 'AUTO_MODE_PI_MODEL'
 const REVIEW_TIMEOUT_MS = 90_000
 const PROMPT_ACTION_LIMIT = 1_500
 
@@ -57,12 +58,25 @@ function toolDescription(tool: ToolInfo | undefined): ToolDescription | undefine
   return { text: tool.description, source: label, trusted: !external && scope !== 'project' }
 }
 
-function reviewerModel(ctx: ExtensionContext, config: AutoModeConfig) {
-  if (!config.model) {
-    return ctx.model
+function configuredModel(config: AutoModeConfig): { spec: string, source: 'env' | 'config' } | undefined {
+  const override = process.env[MODEL_ENV]?.trim()
+  if (override) {
+    return { spec: override, source: 'env' }
   }
-  const slash = config.model.indexOf('/')
-  return slash > 0 ? ctx.modelRegistry.find(config.model.slice(0, slash), config.model.slice(slash + 1)) : undefined
+  if (config.model) {
+    return { spec: config.model, source: 'config' }
+  }
+  return undefined
+}
+
+function reviewerModel(ctx: ExtensionContext, config: AutoModeConfig) {
+  const configured = configuredModel(config)
+  if (!configured) {
+    return { model: ctx.model, configured: undefined }
+  }
+  const slash = configured.spec.indexOf('/')
+  const model = slash > 0 ? ctx.modelRegistry.find(configured.spec.slice(0, slash), configured.spec.slice(slash + 1)) : undefined
+  return { model, configured }
 }
 
 function shortAction(toolName: string, input: unknown): string {
@@ -113,12 +127,14 @@ export default function (pi: ExtensionAPI) {
   }
 
   async function review(ctx: ExtensionContext, config: AutoModeConfig, toolCallId: string, toolName: string, input: unknown): Promise<Verdict> {
-    const model = reviewerModel(ctx, config)
+    const { model, configured } = reviewerModel(ctx, config)
     if (!model) {
       return {
         decision: 'error',
         stage: 1,
-        reason: config.model ? `Reviewer model "${config.model}" was not found.` : 'No model is selected for the session.',
+        reason: configured
+          ? `Reviewer model "${configured.spec}"${configured.source === 'env' ? ` (${MODEL_ENV})` : ''} was not found.`
+          : 'No model is selected for the session.',
         usage: [],
       }
     }
@@ -132,7 +148,7 @@ export default function (pi: ExtensionAPI) {
         maxTokens: request.maxTokens,
         cacheRetention: 'short',
         sessionId: `${ctx.sessionManager.getSessionId()}:${ID}`,
-        ...(config.effort ? { reasoning: config.effort } : {}),
+        ...(config.effort !== 'off' ? { reasoning: config.effort } : {}),
       }).result()
       return reply as unknown as Awaited<ReturnType<Complete>>
     }
@@ -317,10 +333,11 @@ export default function (pi: ExtensionAPI) {
         return
       }
       const config = loadConfig(ctx)
-      const model = reviewerModel(ctx, config)
+      const { model, configured } = reviewerModel(ctx, config)
+      const modelSource = configured === undefined ? ' (session model)' : configured.source === 'env' ? ` (${MODEL_ENV})` : ''
       ctx.ui.notify([
         `Auto mode: ${enabled ? (tracker.paused ? 'on, paused (asking you)' : 'on') : 'off'}`,
-        `Reviewer: ${model ? `${model.provider}/${model.id}` : 'unavailable'}${config.model ? '' : ' (session model)'}${config.effort ? ` (effort: ${config.effort})` : ''}`,
+        `Reviewer: ${model ? `${model.provider}/${model.id}` : 'unavailable'}${modelSource} (effort: ${config.effort})`,
         `Config: ${loader.path}`,
         `Rules: ${config.rules.deny.length} deny, ${config.rules.ask.length} ask, ${config.rules.allow.length} allow`,
         `Blocks: ${tracker.consecutive} in a row, ${tracker.total} total`,

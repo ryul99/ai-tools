@@ -25,8 +25,10 @@ default.
 
 Create `~/.pi/agent/auto-mode.json` (reloaded on change):
 
-- `model` / `effort` — the reviewer as `provider/model-id` (default: the
-  session model)
+- `model` — the reviewer as `provider/model-id` (default: the session model;
+  overridden by the `AUTO_MODE_PI_MODEL` environment variable)
+- `effort` — reasoning effort (`off`, `minimal`, `low`, `medium`, `high`,
+  `xhigh`, `max`; default: `low`)
 - `rules` — `deny` / `ask` / `allow` patterns as `tool` or `tool(pattern)`,
   where `*` matches any text
 - `hard_deny` / `soft_deny` / `allow` / `environment` — plain-English policy

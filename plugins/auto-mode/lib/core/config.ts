@@ -6,13 +6,16 @@ import type { PolicySlots } from './policy.ts'
 import { compileRules } from './rules.ts'
 import type { ToolRules } from './rules.ts'
 
-const EFFORT_LEVELS: readonly ThinkingLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+export type EffortLevel = 'off' | ThinkingLevel
+
+const EFFORT_LEVELS: readonly EffortLevel[] = ['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max']
+const DEFAULT_EFFORT: EffortLevel = 'low'
 
 export interface AutoModeConfig {
   /** `provider/model-id` of the reviewer; the session model when unset. */
   model?: string
-  /** Reasoning effort of the reviewer; the provider default when unset. */
-  effort?: ThinkingLevel
+  /** Reasoning effort of the reviewer; defaults to `low`. */
+  effort: EffortLevel
   rules: ToolRules
   policy: PolicySlots
   /** Problems found while loading, shown to the user. */
@@ -55,9 +58,9 @@ export function parseConfig(text: string | undefined): AutoModeConfig {
     warnings.push('"model" must be "provider/model-id" or null; ignored.')
   }
 
-  let effort: ThinkingLevel | undefined
-  if (typeof raw.effort === 'string' && EFFORT_LEVELS.includes(raw.effort as ThinkingLevel)) {
-    effort = raw.effort as ThinkingLevel
+  let effort: EffortLevel = DEFAULT_EFFORT
+  if (typeof raw.effort === 'string' && EFFORT_LEVELS.includes(raw.effort as EffortLevel)) {
+    effort = raw.effort as EffortLevel
   } else if (raw.effort !== undefined && raw.effort !== null) {
     warnings.push(`"effort" must be one of ${EFFORT_LEVELS.join(', ')} or null; ignored.`)
   }
