@@ -1,4 +1,6 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import type { Component, TuiMouseEvent, TuiMouseEventResult } from '@earendil-works/pi-tui'
 
 const ID = 'you-should-know'
 const TIMEOUT_MS = 60_000
@@ -8,8 +10,12 @@ const CONTEXT_CHARS = 10_000
 const LINE_CHARS = 200
 const DETAIL_CHARS = 600
 const WIDGET_LINE_CHARS = 180
+const WIDGET_PAD_X = 1
+const BUTTON_GAP = 2
 
 type Note = { line: string; detail?: string }
+type ButtonAction = 'open' | 'fill' | 'dismiss'
+type ButtonHitBox = { action: ButtonAction; startCol: number; endCol: number }
 
 type EntryLike = {
   type: string
@@ -112,6 +118,161 @@ function quoteText(note: Note): string {
   return lines.join('\n')
 }
 
+function createNoteWidget(
+  note: Note,
+  expanded: boolean,
+  theme: Theme,
+  onAction: (action: ButtonAction) => void,
+): Component {
+  let cachedWidth: number | undefined
+  let cachedLines: string[] | undefined
+  let actionRow = 0
+  let buttons: ButtonHitBox[] = []
+  let pressed: ButtonAction | undefined
+  let pressedInside = false
+  let handledRelease = false
+
+  const invalidate = () => {
+    cachedWidth = undefined
+    cachedLines = undefined
+  }
+
+  const hitTest = (x: number, y: number): ButtonAction | undefined => {
+    if (y !== actionRow) return undefined
+    for (const box of buttons) {
+      if (x >= box.startCol && x < box.endCol) return box.action
+    }
+    return undefined
+  }
+
+  const component: Component = {
+    render(width: number): string[] {
+      const safeWidth = Math.max(1, width)
+      if (cachedLines && cachedWidth === safeWidth) return cachedLines
+
+      const pad = safeWidth > WIDGET_PAD_X * 2 ? ' '.repeat(WIDGET_PAD_X) : ''
+      const padWidth = pad.length
+      const contentWidth = Math.max(1, safeWidth - padWidth * 2)
+      const lines: string[] = []
+
+      const headText = `${theme.fg('accent', 'Worth knowing')}${theme.fg('dim', ' · ')}${truncate(note.line, WIDGET_LINE_CHARS)}`
+      for (const wrapped of wrapTextWithAnsi(headText, contentWidth)) {
+        lines.push(truncateToWidth(`${pad}${wrapped}`, safeWidth))
+      }
+
+      if (expanded && note.detail) {
+        for (const sentence of sentenceList(note.detail)) {
+          const text = truncate(sentence, WIDGET_LINE_CHARS)
+          for (const wrapped of wrapTextWithAnsi(text, contentWidth)) {
+            lines.push(truncateToWidth(`${pad}${wrapped}`, safeWidth))
+          }
+        }
+      }
+
+      const specs: Array<{ action: ButtonAction; label: string; primary: boolean }> = expanded
+        ? [
+            { action: 'fill', label: '[ Fill ]', primary: true },
+            { action: 'dismiss', label: '[ Dismiss ]', primary: false },
+          ]
+        : [
+            { action: 'open', label: '[ Open ]', primary: true },
+            { action: 'dismiss', label: '[ Dismiss ]', primary: false },
+          ]
+
+      actionRow = lines.length
+      buttons = []
+      let rowText = pad
+      let col = padWidth
+
+      for (let index = 0; index < specs.length; index += 1) {
+        if (index > 0) {
+          rowText += ' '.repeat(BUTTON_GAP)
+          col += BUTTON_GAP
+        }
+        const spec = specs[index]
+        const labelWidth = visibleWidth(spec.label)
+        const startCol = col
+        const endCol = Math.min(safeWidth, startCol + labelWidth)
+        if (startCol < safeWidth && endCol > startCol) {
+          buttons.push({ action: spec.action, startCol, endCol })
+        }
+        const styled = spec.primary
+          ? theme.fg('accent', theme.bold(spec.label))
+          : theme.fg('muted', spec.label)
+        rowText += pressed === spec.action && pressedInside ? theme.inverse(styled) : styled
+        col += labelWidth
+      }
+
+      lines.push(truncateToWidth(rowText, safeWidth, ''))
+      cachedWidth = safeWidth
+      cachedLines = lines
+      return lines
+    },
+
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+      if (!cachedLines || cachedWidth !== Math.max(1, event.width)) {
+        component.render(event.width)
+      }
+
+      if (event.type === 'press') {
+        if (event.button !== 'left') return undefined
+        const hit = hitTest(event.x, event.y)
+        if (!hit) return undefined
+        pressed = hit
+        pressedInside = true
+        handledRelease = false
+        invalidate()
+        return { handled: true, capture: true, render: true }
+      }
+
+      if (event.type === 'drag') {
+        if (!pressed) return undefined
+        const nextInside = hitTest(event.x, event.y) === pressed
+        if (nextInside !== pressedInside) {
+          pressedInside = nextInside
+          invalidate()
+          return { handled: true, render: true }
+        }
+        return { handled: true, render: false }
+      }
+
+      if (event.type === 'release') {
+        if (!pressed) return undefined
+        const action = pressed
+        const shouldTrigger = hitTest(event.x, event.y) === action
+        pressed = undefined
+        pressedInside = false
+        // Alt-screen emits a synthetic click synchronously after release on the same cell.
+        handledRelease = true
+        queueMicrotask(() => {
+          handledRelease = false
+        })
+        invalidate()
+        if (shouldTrigger) onAction(action)
+        return { handled: true, render: true }
+      }
+
+      if (event.type === 'click') {
+        if (handledRelease) {
+          handledRelease = false
+          return { handled: true, render: false }
+        }
+        if (event.button !== 'left') return undefined
+        const hit = hitTest(event.x, event.y)
+        if (!hit) return undefined
+        onAction(hit)
+        return { handled: true, render: true }
+      }
+
+      return undefined
+    },
+
+    invalidate,
+  }
+
+  return component
+}
+
 export default function (pi: ExtensionAPI) {
   let enabled = true
   let latest: AbortController | undefined
@@ -123,18 +284,33 @@ export default function (pi: ExtensionAPI) {
     return line.toLowerCase().trim()
   }
 
+  function handleWidgetAction(ctx: ExtensionContext, action: ButtonAction) {
+    if (action === 'open') {
+      if (!note || expanded) return
+      expanded = true
+      renderWidget(ctx)
+      return
+    }
+    if (action === 'fill') {
+      if (!note || !expanded) return
+      fillNote(ctx)
+      return
+    }
+    if (action === 'dismiss') {
+      hideNote(ctx)
+    }
+  }
+
   function renderWidget(ctx: ExtensionContext) {
     if (!note) {
       ctx.ui.setWidget(ID, undefined)
       return
     }
-    const head = `Worth knowing · ${truncate(note.line, WIDGET_LINE_CHARS)}`
-    if (!expanded) {
-      ctx.ui.setWidget(ID, [head, 'ctrl+shift+e: open · ctrl+shift+d: dismiss'])
-      return
-    }
-    const sentences = note.detail ? sentenceList(note.detail).map(sentence => truncate(sentence, WIDGET_LINE_CHARS)) : []
-    ctx.ui.setWidget(ID, [head, ...sentences, 'ctrl+shift+y: fill · ctrl+shift+d: dismiss'])
+    const currentNote = note
+    const isExpanded = expanded
+    ctx.ui.setWidget(ID, (_tui, theme) =>
+      createNoteWidget(currentNote, isExpanded, theme, action => handleWidgetAction(ctx, action)),
+    )
   }
 
   function hideNote(ctx: ExtensionContext) {
@@ -148,7 +324,7 @@ export default function (pi: ExtensionAPI) {
     if (!note) return
     const draft = ctx.ui.getEditorText() ?? ''
     if (draft.trim() !== '') {
-      ctx.ui.notify('The prompt box has text in it. Clear it, then press fill again.', 'warning')
+      ctx.ui.notify('The prompt box has text in it. Clear it, then click Fill again.', 'warning')
       return
     }
     ctx.ui.setEditorText(quoteText(note))
@@ -207,30 +383,6 @@ export default function (pi: ExtensionAPI) {
     request?.abort()
   })
 
-  pi.registerShortcut('ctrl+shift+e', {
-    description: 'Show the note in full',
-    handler: async ctx => {
-      if (!note || expanded) return
-      expanded = true
-      renderWidget(ctx)
-    },
-  })
-
-  pi.registerShortcut('ctrl+shift+y', {
-    description: 'Fill the prompt box with the note',
-    handler: async ctx => {
-      if (!note || !expanded) return
-      fillNote(ctx)
-    },
-  })
-
-  pi.registerShortcut('ctrl+shift+d', {
-    description: 'Dismiss the note',
-    handler: async ctx => {
-      hideNote(ctx)
-    },
-  })
-
   pi.registerCommand(ID, {
     description: 'Turn the note on or off, or interact with it',
     getArgumentCompletions: prefix => ['on', 'off', 'status', 'more', 'fill', 'dismiss'].filter(item => item.startsWith(prefix)).map(item => ({ value: item, label: item })),
@@ -259,7 +411,7 @@ export default function (pi: ExtensionAPI) {
       }
       if (command === 'fill') {
         if (!note || !expanded) {
-          ctx.ui.notify('Open the note first (ctrl+shift+e).', 'info')
+          ctx.ui.notify('Open the note first (click Open or run /you-should-know more).', 'info')
           return
         }
         fillNote(ctx)

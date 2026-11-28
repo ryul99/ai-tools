@@ -1,10 +1,14 @@
-import type { ExtensionAPI, ExtensionContext } from '@earendil-works/pi-coding-agent'
+import type { ExtensionAPI, ExtensionContext, Theme } from '@earendil-works/pi-coding-agent'
+import { truncateToWidth, visibleWidth, wrapTextWithAnsi } from '@earendil-works/pi-tui'
+import type { Component, TuiMouseEvent, TuiMouseEventResult } from '@earendil-works/pi-tui'
 
 import { lessonPrompt, parseLesson } from '../lib/core/lesson.ts'
 import type { Lesson } from '../lib/core/lesson.ts'
 
 const ID = 'english-lecturer'
 const TIMEOUT_MS = 60_000
+const WIDGET_PAD_X = 1
+const CLOSE_LABEL = '[ Close ]'
 
 function lessonModel(ctx: ExtensionContext) {
   const override = process.env.ENGLISH_LECTURER_PI_MODEL?.trim()
@@ -20,26 +24,141 @@ function displayLine(text: string): string {
   return text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 300)
 }
 
-function lessonLines(lesson: Lesson): string[] {
+function buildContentLines(lesson: Lesson | undefined, theme: Theme): string[] {
+  if (!lesson) {
+    return [`${theme.fg('accent', 'English lecturer')}${theme.fg('dim', ': ')}${theme.fg('muted', 'reviewing your prompt...')}`]
+  }
   return [
-    `English lecturer: ${displayLine(lesson.enhancedPrompt)}`,
+    `${theme.fg('accent', 'English lecturer')}${theme.fg('dim', ': ')}${displayLine(lesson.enhancedPrompt)}`,
     ...(lesson.hasCorrections
       ? lesson.corrections.map(item => displayLine(`- ${item.original} → ${item.suggestion} (${item.explanation})`))
       : []),
-    `Tip: ${displayLine(lesson.tip)}`,
+    `${theme.fg('dim', 'Tip: ')}${displayLine(lesson.tip)}`,
   ]
+}
+
+function createLessonWidget(lesson: Lesson | undefined, theme: Theme, onClose: () => void): Component {
+  let cachedWidth: number | undefined
+  let cachedLines: string[] | undefined
+  let actionRow = 0
+  let closeStartCol = 0
+  let closeEndCol = 0
+  let pressed = false
+  let pressedInside = false
+  let handledRelease = false
+
+  const invalidate = () => {
+    cachedWidth = undefined
+    cachedLines = undefined
+  }
+
+  const isOnClose = (x: number, y: number): boolean => y === actionRow && x >= closeStartCol && x < closeEndCol
+
+  const component: Component = {
+    render(width: number): string[] {
+      const safeWidth = Math.max(1, width)
+      if (cachedLines && cachedWidth === safeWidth) return cachedLines
+
+      const pad = safeWidth > WIDGET_PAD_X * 2 ? ' '.repeat(WIDGET_PAD_X) : ''
+      const padWidth = pad.length
+      const contentWidth = Math.max(1, safeWidth - padWidth * 2)
+      const lines: string[] = []
+
+      for (const line of buildContentLines(lesson, theme)) {
+        for (const wrapped of wrapTextWithAnsi(line, contentWidth)) {
+          lines.push(truncateToWidth(`${pad}${wrapped}`, safeWidth))
+        }
+      }
+
+      actionRow = lines.length
+      closeStartCol = padWidth
+      closeEndCol = Math.min(safeWidth, closeStartCol + visibleWidth(CLOSE_LABEL))
+      const styled = theme.fg('muted', CLOSE_LABEL)
+      const button = pressed && pressedInside ? theme.inverse(styled) : styled
+      lines.push(truncateToWidth(`${pad}${button}`, safeWidth, ''))
+
+      cachedWidth = safeWidth
+      cachedLines = lines
+      return lines
+    },
+
+    handleMouse(event: TuiMouseEvent): TuiMouseEventResult | undefined {
+      if (!cachedLines || cachedWidth !== Math.max(1, event.width)) {
+        component.render(event.width)
+      }
+
+      if (event.type === 'press') {
+        if (event.button !== 'left' || !isOnClose(event.x, event.y)) return undefined
+        pressed = true
+        pressedInside = true
+        handledRelease = false
+        invalidate()
+        return { handled: true, capture: true, render: true }
+      }
+
+      if (event.type === 'drag') {
+        if (!pressed) return undefined
+        const nextInside = isOnClose(event.x, event.y)
+        if (nextInside !== pressedInside) {
+          pressedInside = nextInside
+          invalidate()
+          return { handled: true, render: true }
+        }
+        return { handled: true, render: false }
+      }
+
+      if (event.type === 'release') {
+        if (!pressed) return undefined
+        const shouldClose = isOnClose(event.x, event.y)
+        pressed = false
+        pressedInside = false
+        // Alt-screen emits a synthetic click synchronously after release on the same cell.
+        handledRelease = true
+        queueMicrotask(() => {
+          handledRelease = false
+        })
+        invalidate()
+        if (shouldClose) onClose()
+        return { handled: true, render: true }
+      }
+
+      if (event.type === 'click') {
+        if (handledRelease) {
+          handledRelease = false
+          return { handled: true, render: false }
+        }
+        if (event.button !== 'left' || !isOnClose(event.x, event.y)) return undefined
+        onClose()
+        return { handled: true, render: true }
+      }
+
+      return undefined
+    },
+
+    invalidate,
+  }
+
+  return component
 }
 
 export default function (pi: ExtensionAPI) {
   let latest: AbortController | undefined
   let enabled = true
 
+  function closeWidget(ctx: ExtensionContext) {
+    latest?.abort()
+    latest = undefined
+    ctx.ui.setWidget(ID, undefined)
+  }
+
+  function showWidget(ctx: ExtensionContext, lesson: Lesson | undefined) {
+    ctx.ui.setWidget(ID, (_tui, theme) => createLessonWidget(lesson, theme, () => closeWidget(ctx)))
+  }
+
   function setEnabled(value: boolean, ctx: ExtensionContext) {
     enabled = value
     if (!value) {
-      latest?.abort()
-      latest = undefined
-      ctx.ui.setWidget(ID, undefined)
+      closeWidget(ctx)
       ctx.ui.notify('English lecturer: disable', 'info')
     } else {
       ctx.ui.notify('English lecturer: enable', 'info')
@@ -58,9 +177,7 @@ export default function (pi: ExtensionAPI) {
       } else if (subcommand === 'disable') {
         setEnabled(false, ctx)
       } else if (subcommand === 'close') {
-        latest?.abort()
-        latest = undefined
-        ctx.ui.setWidget(ID, undefined)
+        closeWidget(ctx)
       } else {
         ctx.ui.notify('Usage: /english-lecturer enable|disable|close', 'warning')
       }
@@ -85,7 +202,7 @@ export default function (pi: ExtensionAPI) {
         throw new Error('The model did not return a lesson.')
       }
       if (latest === request) {
-        ctx.ui.setWidget(ID, lessonLines(lesson))
+        showWidget(ctx, lesson)
       }
     } catch (error) {
       if (latest === request) {
@@ -107,7 +224,7 @@ export default function (pi: ExtensionAPI) {
     latest?.abort()
     const request = new AbortController()
     latest = request
-    ctx.ui.setWidget(ID, ['English lecturer: reviewing your prompt...'])
+    showWidget(ctx, undefined)
     void teach(ctx, text, request)
   })
 

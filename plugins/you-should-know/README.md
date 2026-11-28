@@ -7,14 +7,16 @@ non-obvious fact. On by default.
 ## Commands
 
 - `/you-should-know on|off|status` — turn it on/off, show status
-- `/you-should-know more|fill|dismiss` — the same actions as the shortcuts
+- `/you-should-know more|fill|dismiss` — the same actions as the widget buttons
 
-## Key shortcuts
+## Buttons
 
-- Collapsed note: `ctrl+shift+e` open, `ctrl+shift+d` dismiss
-- Expanded note: `ctrl+shift+y` fill prompt box, `ctrl+shift+d` dismiss
+- Collapsed note: click `[ Open ]` to expand, or `[ Dismiss ]` to close
+- Expanded note: click `[ Fill ]` to insert the note into the prompt box, or `[ Dismiss ]` to close
 
-`fill` puts a quoted note (`> ` lines, marked `(side-agent note)`) into the
+Mouse clicks work in Pi's fullscreen mode. In regular mode, use `/you-should-know more|fill|dismiss`.
+
+`Fill` puts a quoted note (`> ` lines, marked `(side-agent note)`) into the
 prompt box; everything you write below it is your own text. The box is never
 overwritten while it has text.
 
