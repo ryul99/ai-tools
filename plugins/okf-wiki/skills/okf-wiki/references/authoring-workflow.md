@@ -48,10 +48,10 @@ Use `okf body set` when the frontmatter must stay byte-for-byte unchanged or whe
 
 ```sh
 okf body get tables/orders --format json   # note "identity"
-okf body get tables/orders > /tmp/orders-body.md
-# Edit /tmp/orders-body.md.
-okf body set tables/orders --from-file /tmp/orders-body.md --if-match <identity> --dry-run
-okf body set tables/orders --from-file /tmp/orders-body.md --if-match <identity> --format json
+okf body get tables/orders > <temp-dir>/orders-body.md
+# Edit <temp-dir>/orders-body.md.
+okf body set tables/orders --from-file <temp-dir>/orders-body.md --if-match <identity> --dry-run
+okf body set tables/orders --from-file <temp-dir>/orders-body.md --if-match <identity> --format json
 ```
 
 The command writes the supplied body exactly; it does not compose or reformat content. Review the `warnings` it reports, which are only the link and citation warnings the new body introduces. Writing back an unedited copy reports `"changed": false`.

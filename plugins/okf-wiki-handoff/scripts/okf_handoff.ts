@@ -72,7 +72,12 @@ function nowIso(): string {
 }
 
 function expandHome(path: string): string {
-  return path === '~' || path.startsWith('~/') ? `${homedir()}${path.slice(1)}` : path
+  if (path === '~') {
+    return homedir()
+  }
+  const rest = path.startsWith('~/') || path.startsWith('~\\') ? path.slice(2) : undefined
+
+  return rest === undefined ? path : join(homedir(), rest)
 }
 
 function remindTokens(): number {
