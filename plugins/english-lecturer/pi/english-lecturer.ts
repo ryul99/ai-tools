@@ -24,16 +24,34 @@ function displayLine(text: string): string {
   return text.replace(/[\p{Cc}\p{Zl}\p{Zp}]+/gu, ' ').trim().slice(0, 300)
 }
 
-function buildContentLines(lesson: Lesson | undefined, theme: Theme): string[] {
+type ContentLine = { text: string; indent: number }
+
+function buildContentLines(lesson: Lesson | undefined, theme: Theme): ContentLine[] {
   if (!lesson) {
-    return [`${theme.fg('accent', 'English lecturer')}${theme.fg('dim', ': ')}${theme.fg('muted', 'reviewing your prompt...')}`]
+    return [{ text: `${theme.fg('accent', 'English lecturer')}${theme.fg('dim', ' · reviewing your prompt...')}`, indent: 0 }]
+  }
+  const count = lesson.hasCorrections ? lesson.corrections.length : 0
+  const header = `${theme.fg('accent', 'English lecturer')}${theme.fg('dim', count > 0 ? ` · ${count} correction${count === 1 ? '' : 's'}` : ' · no corrections')}`
+  if (count === 0) {
+    return [
+      { text: header, indent: 0 },
+      { text: `${theme.fg('dim', 'Tip: ')}${displayLine(lesson.tip)}`, indent: 0 },
+    ]
   }
   return [
-    `${theme.fg('accent', 'English lecturer')}${theme.fg('dim', ': ')}${displayLine(lesson.enhancedPrompt)}`,
-    ...(lesson.hasCorrections
-      ? lesson.corrections.map(item => displayLine(`- ${item.original} → ${item.suggestion} (${item.explanation})`))
-      : []),
-    `${theme.fg('dim', 'Tip: ')}${displayLine(lesson.tip)}`,
+    { text: header, indent: 0 },
+    { text: displayLine(lesson.enhancedPrompt), indent: 0 },
+    { text: '', indent: 0 },
+    ...lesson.corrections.map(item => ({
+      indent: 2,
+      text:
+        `${theme.fg('dim', `[${item.category}]`)} ` +
+        `${theme.fg('error', displayLine(item.original))}` +
+        `${theme.fg('dim', ' → ')}` +
+        `${theme.fg('success', displayLine(item.suggestion))}` +
+        `${theme.fg('dim', ' · ')}${theme.fg('dim', displayLine(item.explanation))}`,
+    })),
+    { text: `${theme.fg('dim', 'Tip: ')}${displayLine(lesson.tip)}`, indent: 0 },
   ]
 }
 
@@ -64,9 +82,10 @@ function createLessonWidget(lesson: Lesson | undefined, theme: Theme, onClose: (
       const contentWidth = Math.max(1, safeWidth - padWidth * 2)
       const lines: string[] = []
 
-      for (const line of buildContentLines(lesson, theme)) {
-        for (const wrapped of wrapTextWithAnsi(line, contentWidth)) {
-          lines.push(truncateToWidth(`${pad}${wrapped}`, safeWidth))
+      for (const { text, indent } of buildContentLines(lesson, theme)) {
+        const indentText = ' '.repeat(indent)
+        for (const wrapped of wrapTextWithAnsi(text, Math.max(1, contentWidth - indent))) {
+          lines.push(truncateToWidth(`${pad}${indentText}${wrapped}`, safeWidth))
         }
       }
 
