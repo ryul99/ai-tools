@@ -32,6 +32,37 @@ function lessonLines(lesson: Lesson): string[] {
 
 export default function (pi: ExtensionAPI) {
   let latest: AbortController | undefined
+  let enabled = true
+
+  function setEnabled(value: boolean, ctx: ExtensionContext) {
+    enabled = value
+    if (!value) {
+      latest?.abort()
+      latest = undefined
+      ctx.ui.setWidget(ID, undefined)
+      ctx.ui.notify('English lecturer: disable', 'info')
+    } else {
+      ctx.ui.notify('English lecturer: enable', 'info')
+    }
+  }
+
+  pi.registerCommand('english-lecturer', {
+    description: '/english-lecturer (enable/disable/close)',
+    handler: async (args, ctx) => {
+      const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase()
+      if (subcommand === 'enable') {
+        setEnabled(true, ctx)
+      } else if (subcommand === 'disable') {
+        setEnabled(false, ctx)
+      } else if (subcommand === 'close') {
+        latest?.abort()
+        latest = undefined
+        ctx.ui.setWidget(ID, undefined)
+      } else {
+        ctx.ui.notify('Usage: /english-lecturer enable|disable|close', 'warning')
+      }
+    },
+  })
 
   async function teach(ctx: ExtensionContext, text: string, request: AbortController) {
     try {
@@ -67,7 +98,7 @@ export default function (pi: ExtensionAPI) {
 
   pi.on('input', (event, ctx) => {
     const text = event.text.trim()
-    if (!ctx.hasUI || event.source === 'extension' || text === '' || text.startsWith('/')) {
+    if (!enabled || !ctx.hasUI || event.source === 'extension' || text === '' || text.startsWith('/')) {
       return
     }
     latest?.abort()
