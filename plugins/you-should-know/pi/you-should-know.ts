@@ -4,7 +4,7 @@ import type { Component, TuiMouseEvent, TuiMouseEventResult } from '@earendil-wo
 
 const ID = 'you-should-know'
 const TIMEOUT_MS = 60_000
-const REVIEW_EVERY = 3
+const REVIEW_EVERY = 5
 const MAX_TOKENS = 400
 const CONTEXT_CHARS = 10_000
 const LINE_CHARS = 200
