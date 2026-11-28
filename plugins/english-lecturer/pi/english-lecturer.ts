@@ -48,6 +48,9 @@ export default function (pi: ExtensionAPI) {
 
   pi.registerCommand('english-lecturer', {
     description: '/english-lecturer (enable/disable/close)',
+    getArgumentCompletions: prefix => ['enable', 'disable', 'close']
+      .filter(item => item.startsWith(prefix.toLowerCase()))
+      .map(item => ({ value: item, label: item })),
     handler: async (args, ctx) => {
       const subcommand = args.trim().split(/\s+/)[0]?.toLowerCase()
       if (subcommand === 'enable') {
